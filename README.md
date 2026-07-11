@@ -1,46 +1,28 @@
-# Graph Memory for Antigravity
+# Graph-Memory
 
-A long-term project memory skill utilizing a local SQLite graph structure to solve context amnesia for AI coding agents.
+A universal, long-term project memory tool utilizing a local SQLite graph structure to solve context amnesia for AI coding agents.
+
+**Natively built for Antigravity (AG)**, Graph-Memory provides autonomous AI agents with a highly structured, relational brain. It is exposed universally via the **Model Context Protocol (MCP)**, meaning any framework (Claude Desktop, Cursor, Codex, Aider) can share and update the exact same graph in real-time.
 
 ## Overview
-When AI agents work on complex software projects over long periods (weeks or months), flat markdown files like `project_memory.md` often fail because they lack structural context, become too long to read, or the agent forgets the relationships between different files, tasks, and infrastructure.
+When AI agents work on complex software projects over long periods, flat markdown files like `project_memory.md` often fail because they lack structural context and the agent forgets the relationships between different files, tasks, and infrastructure.
 
-**Graph Memory** solves this by providing a relational graph database (SQLite-backed) that the agent interacts with directly via CLI.
+**Graph-Memory** solves this by providing a relational graph database (SQLite-backed) that your agents interact with to store long-term architecture.
 
 ## Features
-- **Idempotent Nodes & Edges**: Agents can log Tasks, Decisions, Infrastructure, and Bugs.
-- **Strict Modeling Rules**: Rules enforced via `SKILL.md` ensure no orphaned nodes and strict typing.
-- **Obsidian-style Vis.js HTML Export**: Run a simple command to output a beautiful, physics-based, dark-mode graph visualization in your browser.
-- **Obsidian Markdown Export**: Export the graph directly into Obsidian-compatible markdown files with bidirectional links.
-
-## Installation
-If you are using Antigravity, you can symlink this repository directly into your skills folder:
-```bash
-ln -s "/path/to/Graph memory" ~/.gemini/config/skills/graph_memory
-```
-
-## CLI Usage
-The skill interacts via a python script:
-```bash
-# Add a Node
-python3 scripts/memory_tool.py add_node "Postgres_DB" "Infrastructure" '{"ip": "192.168.1.5"}'
-
-# Add a Relation
-python3 scripts/memory_tool.py add_relation "Server_VM" "HAS_DB" "Postgres_DB"
-
-# Generate HTML Graph Visualization
-python3 scripts/memory_tool.py export_html
-```
+- **Idempotent Nodes & Edges**: Agents log Tasks, Decisions, Infrastructure, and Bugs as connected nodes.
+- **Strict Modeling Rules**: Rules enforced via instructions ensure no orphaned nodes and strict typing.
+- **Obsidian-style Vis.js HTML Export**: Generate beautiful, physics-based, dark-mode graph visualizations in your browser.
+- **Universal State**: The database is stored locally in `.agents/graph_memory.sqlite`, meaning Claude Desktop, Cursor, and Antigravity can all read/write to the exact same brain simultaneously.
 
 ## Universal Setup (MCP Server)
-Graph Memory comes with a Model Context Protocol (MCP) server so it can be universally accessed by any AI coding framework (Claude Desktop, Cursor, Aider, etc.). Since all frameworks store data in `.agents/graph_memory.sqlite` relative to the workspace, they all share the exact same brain!
 
 First, ensure you have the `mcp` SDK installed globally:
 ```bash
 pip install mcp
 ```
 
-### Claude Desktop
+### Claude Desktop Configuration
 Add the following to your `claude_desktop_config.json`:
 ```json
 {
@@ -53,11 +35,48 @@ Add the following to your `claude_desktop_config.json`:
 }
 ```
 
-### Cursor / Codeium
-Add the server in your MCP settings:
+### Cursor / Codex Configuration
+Add the server in your MCP settings or `config.toml`:
 - **Type**: command
 - **Command**: `python3 "/absolute/path/to/Graph memory/scripts/mcp_server.py"`
 
+---
 
-## Data Storage
-The SQLite database and exported HTML files are stored safely out of version control in the `.agents/` directory of the workspace where the agent is running.
+## 🔥 Pro-Tip: Enabling "Live" Auto-Updates
+In Antigravity (AG), Graph-Memory is deeply integrated, meaning the agent automatically updates the database in the background without you asking.
+
+**To get this same "Live Auto-Update" behavior in Claude Desktop, Cursor, or Codex**, you must paste the following rule into your **Project Instructions**, `.cursorrules`, or `.codexrules` file:
+
+```markdown
+# Automated Graph Memory Tracking
+You have access to a `graph_memory` MCP server. You MUST proactively and automatically use the `add_node` and `add_relation` tools to track project state without the user explicitly asking you to. 
+
+Whenever you:
+1. Complete a significant task or milestone.
+2. Make an architectural decision.
+3. Discover or setup new infrastructure.
+
+Quietly run the graph tools at the end of your turn to log this information so it isn't forgotten.
+```
+*Without this rule, Claude/Cursor will treat the graph as a purely manual tool and will only update it when explicitly asked.*
+
+---
+
+## Antigravity Installation (Native)
+If you are using Antigravity, you can symlink this repository directly into your skills folder to use it natively via CLI:
+```bash
+ln -s "/path/to/Graph memory" ~/.gemini/config/skills/graph_memory
+```
+
+## CLI Usage
+If you prefer terminal commands, you can use the script directly:
+```bash
+# Add a Node
+python3 scripts/memory_tool.py add_node "Postgres_DB" "Infrastructure" '{"ip": "192.168.1.5"}'
+
+# Add a Relation
+python3 scripts/memory_tool.py add_relation "Server_VM" "HAS_DB" "Postgres_DB"
+
+# Generate HTML Graph Visualization
+python3 scripts/memory_tool.py export_html
+```
