@@ -211,7 +211,7 @@ def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict 
                 existing_props.update(props)
                 conn.execute("""
                     UPDATE Nodes 
-                    SET properties = ?, updated_at = ?, access_count = access_count + 1, trust_score = ?
+                    SET properties = ?, updated_at = ?, access_count = access_count + 1, trust_score = MAX(trust_score, ?)
                     WHERE id = ?
                 """, (json.dumps(existing_props), now_iso(), trust_score, node_id))
                 return node_id
@@ -239,7 +239,7 @@ def create_relation(db_path: str, source_id: str, target_id: str, relation_type:
                 ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
                     properties = excluded.properties,
                     last_verified_at = ?,
-                    trust_score = excluded.trust_score
+                    trust_score = MAX(trust_score, excluded.trust_score)
             """, (source_id, target_id, relation_type, json.dumps(props), now_iso(), trust_score, now_iso()))
 
 def add_observation(db_path: str, node_id: str, observation: str):
