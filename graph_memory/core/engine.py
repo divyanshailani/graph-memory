@@ -293,20 +293,22 @@ def read_graph(db_path: str) -> dict:
     init_db(db_path)
     with get_connection(db_path) as conn:
         nodes = []
-        for row in conn.execute("SELECT id, label, properties FROM Nodes WHERE is_deleted = 0").fetchall():
+        for row in conn.execute("SELECT id, label, properties, trust_score FROM Nodes WHERE is_deleted = 0").fetchall():
             nodes.append({
                 "id": row[0],
                 "label": row[1],
-                "properties": json.loads(row[2]) if row[2] else {}
+                "properties": json.loads(row[2]) if row[2] else {},
+                "trust_score": row[3]
             })
             
         edges = []
-        for row in conn.execute("SELECT source_id, target_id, relation_type, properties FROM Edges").fetchall():
+        for row in conn.execute("SELECT source_id, target_id, relation_type, properties, trust_score FROM Edges").fetchall():
             edges.append({
                 "source_id": row[0],
                 "target_id": row[1],
                 "relation_type": row[2],
-                "properties": json.loads(row[3]) if row[3] else {}
+                "properties": json.loads(row[3]) if row[3] else {},
+                "trust_score": row[4]
             })
             
         return {"nodes": nodes, "edges": edges}

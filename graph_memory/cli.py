@@ -98,10 +98,24 @@ def main():
             # Simple HTML generator using vis.js
             nodes_js = []
             for n in graph["nodes"]:
+                trust = n.get("trust_score", 1.0)
+                if trust >= 0.9:
+                    bg_color = "#2ecc71" # Green
+                elif trust >= 0.6:
+                    bg_color = "#f39c12" # Orange
+                else:
+                    bg_color = "#e74c3c" # Red
+                    
                 nodes_js.append({
                     "id": n["id"],
-                    "label": n["id"],
-                    "title": json.dumps(n["properties"])
+                    "label": f"{n['id']}\\n({n['label']})",
+                    "title": json.dumps(n["properties"], indent=2),
+                    "color": {
+                        "background": bg_color,
+                        "border": "#ffffff",
+                        "highlight": {"background": bg_color, "border": "#ffffff"}
+                    },
+                    "font": {"color": "#ffffff", "face": "system-ui"}
                 })
             
             edges_js = []
@@ -110,7 +124,16 @@ def main():
                     "from": e["source_id"],
                     "to": e["target_id"],
                     "label": e["relation_type"],
-                    "title": json.dumps(e["properties"])
+                    "title": json.dumps(e["properties"], indent=2),
+                    "arrows": "to",
+                    "color": {"color": "#a6accd"},
+                    "font": {
+                        "align": "middle", 
+                        "color": "#ffffff", 
+                        "strokeWidth": 3, 
+                        "strokeColor": "#1e1e2e",
+                        "face": "system-ui"
+                    }
                 })
                 
             html_content = f"""
@@ -120,17 +143,40 @@ def main():
                 <title>Graph Memory Visualization</title>
                 <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
                 <style type="text/css">
-                    #mynetwork {{ width: 100vw; height: 100vh; border: 1px solid lightgray; }}
+                    body {{ background-color: #1e1e2e; margin: 0; padding: 0; overflow: hidden; font-family: system-ui; }}
+                    #mynetwork {{ width: 100vw; height: 100vh; border: none; }}
+                    #legend {{ position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; }}
                 </style>
             </head>
             <body>
+            <div id="legend">
+                <h3>Trust Scores</h3>
+                <div><span style="color:#2ecc71;">■</span> High Trust (>= 0.9)</div>
+                <div><span style="color:#f39c12;">■</span> Medium Trust (0.6 - 0.8)</div>
+                <div><span style="color:#e74c3c;">■</span> Low Trust (< 0.6)</div>
+            </div>
             <div id="mynetwork"></div>
             <script type="text/javascript">
                 var nodes = new vis.DataSet({json.dumps(nodes_js)});
                 var edges = new vis.DataSet({json.dumps(edges_js)});
                 var container = document.getElementById('mynetwork');
                 var data = {{ nodes: nodes, edges: edges }};
-                var options = {{}};
+                var options = {{
+                    physics: {{
+                        forceAtlas2Based: {{
+                            gravitationalConstant: -50,
+                            centralGravity: 0.01,
+                            springLength: 100,
+                            springConstant: 0.08
+                        }},
+                        maxVelocity: 50,
+                        solver: 'forceAtlas2Based',
+                        timestep: 0.35,
+                        stabilization: {{ iterations: 150 }}
+                    }},
+                    edges: {{ smooth: {{ type: 'continuous' }} }},
+                    interaction: {{ hover: true }}
+                }};
                 var network = new vis.Network(container, data, options);
             </script>
             </body>
