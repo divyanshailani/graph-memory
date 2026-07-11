@@ -4,7 +4,8 @@ import os
 
 def get_db_path():
     # Store the DB in the .agents directory of the current workspace
-    agents_dir = os.path.join(os.getcwd(), '.agents')
+    workspace_dir = os.environ.get("GRAPH_MEMORY_WORKSPACE", os.getcwd())
+    agents_dir = os.path.join(workspace_dir, '.agents')
     os.makedirs(agents_dir, exist_ok=True)
     return os.path.join(agents_dir, 'graph_memory.sqlite')
 
