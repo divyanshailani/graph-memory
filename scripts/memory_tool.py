@@ -285,6 +285,8 @@ def main():
         cmd_export_html(args)
     elif args.command == "export_obsidian":
         cmd_export_obsidian(args)
+    elif args.command == "delete_node":
+        cmd_delete_node(args)
     else:
         parser.print_help()
 
