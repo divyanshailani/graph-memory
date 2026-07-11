@@ -40,7 +40,7 @@ Graph memory/
 You can now install Graph-Memory globally via pip! No more cloning needed.
 
 ```bash
-pip install graph-memory
+pip install epistemic-graph-memory
 ```
 
 This installs two global commands:
