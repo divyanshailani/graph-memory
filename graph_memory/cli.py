@@ -108,14 +108,16 @@ def main():
                     
                 nodes_js.append({
                     "id": n["id"],
-                    "label": f"{n['id']}\\n({n['label']})",
+                    "label": f"{n['id']}\n({n['label']})",
+                    "shape": "box",
+                    "margin": 12,
                     "title": json.dumps(n["properties"], indent=2),
                     "color": {
                         "background": bg_color,
-                        "border": "#ffffff",
+                        "border": bg_color,
                         "highlight": {"background": bg_color, "border": "#ffffff"}
                     },
-                    "font": {"color": "#ffffff", "face": "system-ui"}
+                    "font": {"color": "#1e1e2e", "face": "system-ui", "bold": True}
                 })
             
             edges_js = []
@@ -164,17 +166,20 @@ def main():
                 var options = {{
                     physics: {{
                         forceAtlas2Based: {{
-                            gravitationalConstant: -50,
-                            centralGravity: 0.01,
-                            springLength: 100,
-                            springConstant: 0.08
+                            gravitationalConstant: -150,
+                            centralGravity: 0.005,
+                            springLength: 250,
+                            springConstant: 0.04
                         }},
                         maxVelocity: 50,
                         solver: 'forceAtlas2Based',
                         timestep: 0.35,
                         stabilization: {{ iterations: 150 }}
                     }},
-                    edges: {{ smooth: {{ type: 'continuous' }} }},
+                    edges: {{ 
+                        smooth: {{ type: 'continuous' }},
+                        color: {{ opacity: 0.5 }}
+                    }},
                     interaction: {{ hover: true }}
                 }};
                 var network = new vis.Network(container, data, options);
