@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
-Name: graph-memory
-Version: 1.2.0
+Name: epistemic-graph-memory
+Version: 1.5.0
 Summary: A universal, long-term project memory tool utilizing a local SQLite graph structure for AI agents.
 Author: Divyansh Ailani
 Classifier: Programming Language :: Python :: 3
@@ -9,6 +9,23 @@ Classifier: Operating System :: OS Independent
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
 Requires-Dist: mcp>=1.1.2
+Requires-Dist: tree-sitter>=0.22.0
+Provides-Extra: python
+Requires-Dist: tree-sitter-python; extra == "python"
+Provides-Extra: typescript
+Requires-Dist: tree-sitter-typescript; extra == "typescript"
+Provides-Extra: javascript
+Requires-Dist: tree-sitter-javascript; extra == "javascript"
+Provides-Extra: go
+Requires-Dist: tree-sitter-go; extra == "go"
+Provides-Extra: rust
+Requires-Dist: tree-sitter-rust; extra == "rust"
+Provides-Extra: all
+Requires-Dist: tree-sitter-python; extra == "all"
+Requires-Dist: tree-sitter-typescript; extra == "all"
+Requires-Dist: tree-sitter-javascript; extra == "all"
+Requires-Dist: tree-sitter-go; extra == "all"
+Requires-Dist: tree-sitter-rust; extra == "all"
 
 # Graph-Memory
 
@@ -52,7 +69,7 @@ Graph memory/
 You can now install Graph-Memory globally via pip! No more cloning needed.
 
 ```bash
-pip install graph-memory
+pip install epistemic-graph-memory
 ```
 
 This installs two global commands:

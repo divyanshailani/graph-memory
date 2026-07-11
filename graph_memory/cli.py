@@ -5,6 +5,7 @@ import os
 import glob
 
 from graph_memory.core import engine
+from graph_memory.core.ingest import ingest_codebase
 
 def main():
     parser = argparse.ArgumentParser(description="Graph-Memory CLI Tool")
@@ -46,11 +47,18 @@ def main():
     sweep_parser = subparsers.add_parser("sweep", help="Sweep and soft-delete orphaned nodes")
     sweep_parser.add_argument("--root", type=str, default="Project_Graph_Memory", help="Root node ID to protect from sweeping (default: Project_Graph_Memory)")
 
-    # import_md
-    import_md_parser = subparsers.add_parser("import", help="Import legacy markdown files into the graph")
-    import_md_parser.add_argument("directory", type=str, help="Directory containing .md files")
+    # Import
+    import_parser = subparsers.add_parser("import", help="Import legacy Markdown files (.md) into the graph")
+    import_parser.add_argument("directory", help="Directory containing .md files to import")
+    
+    # Ingest Code
+    ingest_parser = subparsers.add_parser("ingest-code", help="Parse AST of a codebase and build structural MOC graph")
+    ingest_parser.add_argument("directory", help="Directory containing code to ingest")
+    
+    # Summarize MOCs
+    summarize_parser = subparsers.add_parser("summarize-mocs", help="Auto-generates semantic summaries for all MOCs")
 
-    # export_html
+    # Export HTML_html
     export_html_parser = subparsers.add_parser("export_html", help="Export the graph to an HTML visualization")
     export_html_parser.add_argument("output_file", type=str, help="Output HTML file path")
 
@@ -109,6 +117,14 @@ def main():
                     print(f"Imported: {node_id}")
                 except Exception as e:
                     print(f"Error importing {fpath}: {e}")
+
+        elif args.command == "ingest-code":
+            from graph_memory.core.ingest import ingest_codebase
+            ingest_codebase(db_path, args.directory)
+
+        elif args.command == "summarize-mocs":
+            from graph_memory.core.summarizer import generate_moc_summaries
+            generate_moc_summaries(db_path)
 
         elif args.command == "export_html":
             graph = engine.read_graph(db_path)
