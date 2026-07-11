@@ -41,7 +41,9 @@ pip install mcp
 ```
 
 ### Claude Desktop Configuration
-Add the following to your `claude_desktop_config.json`:
+Add the following to your `claude_desktop_config.json`. Note that paths and Python commands differ by OS.
+
+**macOS/Linux:**
 ```json
 {
   "mcpServers": {
@@ -53,10 +55,23 @@ Add the following to your `claude_desktop_config.json`:
 }
 ```
 
+**Windows:**
+```json
+{
+  "mcpServers": {
+    "graph_memory": {
+      "command": "python",
+      "args": ["C:\\absolute\\path\\to\\Graph memory\\scripts\\mcp_server.py"]
+    }
+  }
+}
+```
+
 ### Cursor / Codex Configuration
 Add the server in your MCP settings or `config.toml`:
 - **Type**: command
-- **Command**: `python3 "/absolute/path/to/Graph memory/scripts/mcp_server.py"`
+- **Command (macOS/Linux)**: `python3 "/absolute/path/to/Graph memory/scripts/mcp_server.py"`
+- **Command (Windows)**: `python "C:\absolute\path\to\Graph memory\scripts\mcp_server.py"`
 
 ---
 
@@ -81,13 +96,21 @@ Quietly run the graph tools at the end of your turn to log this information so i
 ---
 
 ## Antigravity Installation (Native)
-If you are using Antigravity, you can symlink this repository directly into your skills folder to use it natively via CLI:
+If you are using Antigravity, you can link this repository directly into your skills folder to use it natively via CLI.
+
+**macOS/Linux:**
 ```bash
 ln -s "/path/to/Graph memory" ~/.gemini/config/skills/graph_memory
 ```
 
+**Windows (Run Command Prompt as Administrator):**
+```cmd
+mklink /D "C:\Users\YOUR_USERNAME\.gemini\config\skills\graph_memory" "C:\path\to\Graph memory"
+```
+
 ## CLI Usage
-If you prefer terminal commands, you can use the script directly. Note that `verification_method` is strictly required:
+If you prefer terminal commands, you can use the script directly. Note that `verification_method` is strictly required. 
+*(Note: If you are on Windows, use `python` instead of `python3`)*:
 ```bash
 # Add a Node
 python3 scripts/memory_tool.py add_node "Postgres_DB" "Infrastructure" "source_read" '{"ip": "192.168.1.5"}'
