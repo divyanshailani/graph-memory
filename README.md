@@ -95,6 +95,12 @@ python3 scripts/memory_tool.py add_node "Postgres_DB" "Infrastructure" "source_r
 # Add a Relation
 python3 scripts/memory_tool.py add_relation "Server_VM" "HAS_DB" "Postgres_DB" "assumed"
 
+# Get a Node
+python3 scripts/memory_tool.py get_node "Postgres_DB"
+
+# Delete a Node
+python3 scripts/memory_tool.py delete_node "Postgres_DB"
+
 # Generate HTML Graph Visualization
 python3 scripts/memory_tool.py export_html
 ```
