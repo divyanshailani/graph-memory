@@ -1,3 +1,15 @@
+Metadata-Version: 2.4
+Name: graph-memory
+Version: 1.2.0
+Summary: A universal, long-term project memory tool utilizing a local SQLite graph structure for AI agents.
+Author: Divyansh Ailani
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: mcp>=1.1.2
+
 # Graph-Memory
 
 A universal, long-term project memory tool utilizing a local SQLite graph structure to solve context amnesia for AI coding agents.
@@ -33,32 +45,23 @@ Graph memory/
 - **Obsidian-style Vis.js HTML Export**: Generate beautiful, physics-based, dark-mode graph visualizations in your browser. Stale or hallucinated nodes are visually flagged.
 - **Universal State**: The database is stored locally in `.agents/graph_memory.sqlite`, meaning Claude Desktop, Cursor, and Antigravity can all read/write to the exact same brain simultaneously.
 
-## Quickstart
+## Universal Setup (MCP Server)
 
-### 1. Installation
-
-You can now install Graph-Memory globally via pip! No more cloning needed.
-
+First, ensure you have the `mcp` SDK installed globally:
 ```bash
-pip install graph-memory
+pip install mcp
 ```
 
-This installs two global commands:
-- `graph-memory` (The local CLI tool)
-- `graph-memory-mcp` (The MCP server for AI agents)
-
-### 2. Connect to your AI
-
-Graph-Memory exposes the exact 9 standard MCP Tool signatures (`create_entities`, `search_nodes`, `add_observations`, etc.). This makes it a **100% Drop-In Replacement** for the official Anthropic Memory Server.
-
-Add the following to your AI framework's configuration:
+### Claude Desktop Configuration
+Add the following to your `claude_desktop_config.json`. Note that paths and Python commands differ by OS.
 
 **macOS/Linux:**
 ```json
 {
   "mcpServers": {
-    "graph-memory": {
-      "command": "graph-memory-mcp"
+    "graph_memory": {
+      "command": "python3",
+      "args": ["/absolute/path/to/Graph memory/scripts/mcp_server.py"]
     }
   }
 }
@@ -68,12 +71,19 @@ Add the following to your AI framework's configuration:
 ```json
 {
   "mcpServers": {
-    "graph-memory": {
-      "command": "graph-memory-mcp"
+    "graph_memory": {
+      "command": "python",
+      "args": ["C:\\absolute\\path\\to\\Graph memory\\scripts\\mcp_server.py"]
     }
   }
 }
 ```
+
+### Cursor / Codex Configuration
+Add the server in your MCP settings or `config.toml`:
+- **Type**: command
+- **Command (macOS/Linux)**: `python3 "/absolute/path/to/Graph memory/scripts/mcp_server.py"`
+- **Command (Windows)**: `python "C:\absolute\path\to\Graph memory\scripts\mcp_server.py"`
 
 ---
 
@@ -110,33 +120,22 @@ ln -s "/path/to/Graph memory" ~/.gemini/config/skills/graph_memory
 mklink /D "C:\Users\YOUR_USERNAME\.gemini\config\skills\graph_memory" "C:\path\to\Graph memory"
 ```
 
-### Manual CLI Tools
-
-You can interact with the graph database directly from your terminal using the installed `graph-memory` command! By default, it will look for `.agents/graph_memory.sqlite` in your current working directory.
-
+## CLI Usage
+If you prefer terminal commands, you can use the script directly. Note that `verification_method` is strictly required. 
+*(Note: If you are on Windows, use `python` instead of `python3`)*:
 ```bash
-# Add an Entity with JSON properties (Observations)
-graph-memory add_node "Postgres_DB" "Database" '{"observations": ["Assumed based on backend code."]}'
+# Add a Node
+python3 scripts/memory_tool.py add_node "Postgres_DB" "Infrastructure" "source_read" '{"ip": "192.168.1.5"}'
 
 # Add a Relation
-graph-memory add_relation "Server_VM" "HAS_DB" "Postgres_DB"
+python3 scripts/memory_tool.py add_relation "Server_VM" "HAS_DB" "Postgres_DB" "assumed"
 
-# Get a Node's Subgraph
-graph-memory get_node "Postgres_DB"
+# Get a Node
+python3 scripts/memory_tool.py get_node "Postgres_DB"
 
-# Search using FTS5 Natural Language
-graph-memory search "Assumed based on backend"
+# Delete a Node
+python3 scripts/memory_tool.py delete_node "Postgres_DB"
 
-# Soft-Delete a Node
-graph-memory delete_node "Postgres_DB"
-
-# Export Graph to an Interactive HTML file
-graph-memory export_html my_graph.html
-```
-
-## Advanced Configuration
-
-You can override the default database location by setting the environment variable:
-```bash
-export GRAPH_MEMORY_DB_PATH="/path/to/my_global_brain.sqlite"
+# Generate HTML Graph Visualization
+python3 scripts/memory_tool.py export_html
 ```

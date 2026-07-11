@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graph-memory"
+version = "1.2.0"
+authors = [
+  { name="Divyansh Ailani" },
+]
+description = "A universal, long-term project memory tool utilizing a local SQLite graph structure for AI agents."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "mcp>=1.1.2",
+]
+
+[project.scripts]
+graph-memory = "graph_memory.cli:main"
+graph-memory-mcp = "graph_memory.mcp.server:main"
