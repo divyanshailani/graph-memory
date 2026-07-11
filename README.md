@@ -1,5 +1,8 @@
 # Epistemic Graph Memory
 
+![Epistemic Graph Memory 2D UI Hover State](assets/screenshot1.png)
+![Epistemic Graph Memory 2D UI Global View](assets/screenshot2.png)
+
 A universal, long-term project memory tool utilizing a local SQLite graph structure to solve context amnesia for AI coding agents.
 
 **Natively built for Antigravity (AG)**, Graph-Memory provides autonomous AI agents with a highly structured, relational brain. It is exposed universally via the **Model Context Protocol (MCP)**, meaning any framework (Claude Desktop, Cursor, Codex, Aider) can share and update the exact same graph in real-time.
