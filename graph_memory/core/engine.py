@@ -83,7 +83,8 @@ def init_db(db_path: str):
                     updated_at TEXT NOT NULL,
                     access_count INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'active', -- active, superseded
-                    is_deleted INTEGER DEFAULT 0
+                    is_deleted INTEGER DEFAULT 0,
+                    trust_score FLOAT DEFAULT 1.0
                 )
             """)
             
@@ -98,11 +99,22 @@ def init_db(db_path: str):
                     created_at TEXT NOT NULL,
                     last_verified_at TEXT,
                     status TEXT DEFAULT 'active', -- active, superseded
+                    trust_score FLOAT DEFAULT 1.0,
                     FOREIGN KEY(source_id) REFERENCES Nodes(id) ON DELETE CASCADE,
                     FOREIGN KEY(target_id) REFERENCES Nodes(id) ON DELETE CASCADE,
                     UNIQUE(source_id, target_id, relation_type)
                 )
             """)
+            
+            # Migration for existing databases
+            try:
+                conn.execute("ALTER TABLE Nodes ADD COLUMN trust_score FLOAT DEFAULT 1.0")
+            except sqlite3.OperationalError:
+                pass # Column already exists
+            try:
+                conn.execute("ALTER TABLE Edges ADD COLUMN trust_score FLOAT DEFAULT 1.0")
+            except sqlite3.OperationalError:
+                pass # Column already exists
             
             # FTS5 Shadow Table for Full-Text Search
             conn.execute("""
@@ -146,9 +158,9 @@ def init_db(db_path: str):
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-def search_nodes(db_path: str, query: str) -> list:
+def search_nodes(db_path: str, query: str, min_trust: float = 0.6) -> list:
     """
-    Full-Text Search across the graph using FTS5. Excludes soft-deleted nodes.
+    Full-Text Search across the graph using FTS5. Excludes soft-deleted nodes and those below trust threshold.
     """
     init_db(db_path)
     with get_connection(db_path) as conn:
@@ -156,10 +168,10 @@ def search_nodes(db_path: str, query: str) -> list:
             SELECT n.id, n.label, n.properties, n.status 
             FROM NodesFTS f
             JOIN Nodes n ON f.rowid = n.rowid
-            WHERE NodesFTS MATCH ? AND n.is_deleted = 0
+            WHERE NodesFTS MATCH ? AND n.is_deleted = 0 AND n.trust_score >= ?
             ORDER BY rank
             LIMIT 20
-        """, (query,))
+        """, (query, min_trust))
         
         results = []
         for row in cursor.fetchall():
@@ -180,7 +192,7 @@ def search_nodes(db_path: str, query: str) -> list:
                 
         return results
 
-def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict = None) -> str:
+def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict = None, trust_score: float = 1.0) -> str:
     """
     Creates a node, or returns an existing one to prevent fragmentation.
     Implements the "Supersession" problem solution.
@@ -199,20 +211,20 @@ def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict 
                 existing_props.update(props)
                 conn.execute("""
                     UPDATE Nodes 
-                    SET properties = ?, updated_at = ?, access_count = access_count + 1
+                    SET properties = ?, updated_at = ?, access_count = access_count + 1, trust_score = ?
                     WHERE id = ?
-                """, (json.dumps(existing_props), now_iso(), node_id))
+                """, (json.dumps(existing_props), now_iso(), trust_score, node_id))
                 return node_id
             
             # Insert new node
             conn.execute("""
-                INSERT INTO Nodes (id, label, properties, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (node_id, label, json.dumps(props), now_iso(), now_iso()))
+                INSERT INTO Nodes (id, label, properties, created_at, updated_at, trust_score)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (node_id, label, json.dumps(props), now_iso(), now_iso(), trust_score))
             
             return node_id
 
-def create_relation(db_path: str, source_id: str, target_id: str, relation_type: str, properties: dict = None):
+def create_relation(db_path: str, source_id: str, target_id: str, relation_type: str, properties: dict = None, trust_score: float = 1.0):
     """
     Draw an edge. Composite UNIQUE constraint prevents identical duplicates.
     """
@@ -222,12 +234,13 @@ def create_relation(db_path: str, source_id: str, target_id: str, relation_type:
     with get_connection(db_path) as conn:
         with write_transaction(conn):
             conn.execute("""
-                INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, trust_score)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
                     properties = excluded.properties,
-                    last_verified_at = ?
-            """, (source_id, target_id, relation_type, json.dumps(props), now_iso(), now_iso()))
+                    last_verified_at = ?,
+                    trust_score = excluded.trust_score
+            """, (source_id, target_id, relation_type, json.dumps(props), now_iso(), trust_score, now_iso()))
 
 def add_observation(db_path: str, node_id: str, observation: str):
     """
@@ -302,7 +315,7 @@ def read_graph(db_path: str) -> dict:
 # Serialization
 # ---------------------------------------------------------------------------
 
-def serialize_subgraph(db_path: str, central_node_id: str) -> str:
+def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.6) -> str:
     """
     Converts a node's immediate neighborhood into an LLM-readable format.
     Maximizes attention while minimizing token bloat.
@@ -312,11 +325,11 @@ def serialize_subgraph(db_path: str, central_node_id: str) -> str:
         node = conn.execute("""
             SELECT label, properties, status, updated_at 
             FROM Nodes 
-            WHERE id = ? AND is_deleted = 0
-        """, (central_node_id,)).fetchone()
+            WHERE id = ? AND is_deleted = 0 AND trust_score >= ?
+        """, (central_node_id, min_trust)).fetchone()
         
         if not node:
-            return f"Node '{central_node_id}' not found or deleted."
+            return f"Node '{central_node_id}' not found, deleted, or below trust threshold."
             
         label, props_json, status, updated_at = node
         props = json.loads(props_json) if props_json else {}
@@ -331,8 +344,8 @@ def serialize_subgraph(db_path: str, central_node_id: str) -> str:
         edges = conn.execute("""
             SELECT relation_type, target_id, properties 
             FROM Edges 
-            WHERE source_id = ?
-        """, (central_node_id,)).fetchall()
+            WHERE source_id = ? AND trust_score >= ?
+        """, (central_node_id, min_trust)).fetchall()
         
         if not edges:
             output.append("  (None)")
@@ -344,8 +357,8 @@ def serialize_subgraph(db_path: str, central_node_id: str) -> str:
         incoming_edges = conn.execute("""
             SELECT source_id, relation_type, properties 
             FROM Edges 
-            WHERE target_id = ?
-        """, (central_node_id,)).fetchall()
+            WHERE target_id = ? AND trust_score >= ?
+        """, (central_node_id, min_trust)).fetchall()
         
         if incoming_edges:
             output.append("Incoming Relationships:")
