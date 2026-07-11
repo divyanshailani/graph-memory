@@ -2,7 +2,7 @@ import sys
 import json
 import os
 from mcp.server.fastmcp import FastMCP
-from db import init_db, add_node as db_add_node, add_relation as db_add_relation, get_node as db_get_node, get_all_nodes, get_all_relations
+from db import init_db, add_node as db_add_node, add_relation as db_add_relation, get_node as db_get_node, get_all_nodes, get_all_relations, delete_node as db_delete_node
 
 # Initialize FastMCP Server
 mcp = FastMCP("Graph Memory Server")
@@ -80,6 +80,22 @@ def get_node(workspace_dir: str, id: str) -> str:
     if not data:
         return f"Node '{id}' not found in memory."
     return json.dumps(data, indent=2)
+
+@mcp.tool()
+def delete_node(workspace_dir: str, id: str) -> str:
+    """
+    Deletes a node and all of its incoming and outgoing relationships from the graph memory.
+    
+    Args:
+        workspace_dir: The absolute path to the user's current project workspace.
+        id: The unique identifier of the node to delete
+    """
+    _set_workspace(workspace_dir)
+    try:
+        db_delete_node(id)
+        return f"Successfully deleted node '{id}' and its relationships from workspace {workspace_dir}"
+    except Exception as e:
+        return f"Error deleting node: {str(e)}"
 
 @mcp.tool()
 def refresh_graph_visualization(workspace_dir: str) -> str:

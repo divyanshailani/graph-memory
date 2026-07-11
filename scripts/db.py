@@ -113,6 +113,16 @@ def add_relation(source_id, relation_type, target_id, verification_method, attri
     conn.commit()
     conn.close()
 
+def delete_node(node_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    # Delete relations where this node is source or target
+    cursor.execute('DELETE FROM relations WHERE source_id = ? OR target_id = ?', (node_id, node_id))
+    # Delete the node itself
+    cursor.execute('DELETE FROM nodes WHERE id = ?', (node_id,))
+    conn.commit()
+    conn.close()
+
 def get_node(node_id):
     conn = get_connection()
     cursor = conn.cursor()

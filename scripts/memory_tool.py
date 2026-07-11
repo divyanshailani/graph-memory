@@ -3,7 +3,7 @@ import json
 import os
 import argparse
 from datetime import datetime, timezone
-from db import init_db, add_node, add_relation, get_node, get_all_nodes, get_all_relations
+from db import init_db, add_node, add_relation, get_node, get_all_nodes, get_all_relations, delete_node
 
 def cmd_add_node(args):
     attrs = json.loads(args.attributes) if args.attributes else {}
@@ -13,6 +13,10 @@ def cmd_add_node(args):
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+
+def cmd_delete_node(args):
+    delete_node(args.id)
+    print(f"Deleted node: {args.id} and its relationships")
 
 def cmd_add_relation(args):
     attrs = json.loads(args.attributes) if args.attributes else {}
@@ -258,7 +262,12 @@ def main():
     
     p_get = subparsers.add_parser("get_node")
     p_get.add_argument("id")
-    
+    p_get.set_defaults(func=cmd_get_node)
+
+    p_delete = subparsers.add_parser("delete_node")
+    p_delete.add_argument("id")
+    p_delete.set_defaults(func=cmd_delete_node)
+
     p_html = subparsers.add_parser("export_html")
     
     p_obsidian = subparsers.add_parser("export_obsidian")
