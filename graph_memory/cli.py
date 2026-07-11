@@ -62,6 +62,10 @@ def main():
     export_html_parser = subparsers.add_parser("export_html", help="Export the graph to an HTML visualization")
     export_html_parser.add_argument("output_file", type=str, help="Output HTML file path")
 
+    # Export 3D WebGL
+    export_3d_parser = subparsers.add_parser("export-3d", help="Export the graph into a GPU-accelerated WebGL 3D Viewer")
+    export_3d_parser.add_argument("output_file", type=str, help="Output HTML file path")
+
     args = parser.parse_args()
     
     db_path = args.db or engine.get_db_path()
@@ -125,6 +129,183 @@ def main():
         elif args.command == "summarize-mocs":
             from graph_memory.core.summarizer import generate_moc_summaries
             generate_moc_summaries(db_path)
+
+        elif args.command == "export-3d":
+            with engine.get_connection(db_path) as conn:
+                nodes = []
+                links = []
+                
+                db_nodes = conn.execute("SELECT id, label, trust_score, properties FROM Nodes WHERE is_deleted = 0").fetchall()
+                for n_id, label, trust, props in db_nodes:
+                    color = "#00ffa6" if trust >= 0.9 else "#ffbb00" if trust >= 0.6 else "#ff3366"
+                    nodes.append({
+                        "id": n_id,
+                        "name": n_id,
+                        "group": label,
+                        "color": color,
+                        "val": 1.5 if label == 'Domain' else 0.5
+                    })
+                    
+                db_edges = conn.execute("SELECT source_id, target_id, relation_type FROM Edges WHERE status = 'active'").fetchall()
+                for src, tgt, rel in db_edges:
+                    links.append({
+                        "source": src,
+                        "target": tgt,
+                        "name": rel
+                    })
+
+            graph_data = json.dumps({"nodes": nodes, "links": links})
+
+            html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Epistemic Graph Memory - Fast 2D Canvas</title>
+    <style> 
+        body {{ margin: 0; overflow: hidden; background-color: #0b0d17; font-family: sans-serif; }}
+        #legend {{
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(11, 13, 23, 0.85);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #ffffff;
+            font-size: 14px;
+            z-index: 1000;
+        }}
+        .legend-item {{ display: flex; align-items: center; margin-top: 8px; }}
+        .color-box {{ width: 12px; height: 12px; margin-right: 8px; border-radius: 2px; }}
+    </style>
+    <script src="https://unpkg.com/force-graph@1.43.3/dist/force-graph.min.js"></script>
+</head>
+<body>
+    <div id="legend">
+        <b>Trust Scores</b>
+        <div class="legend-item"><div class="color-box" style="background:#00ffa6;"></div> High Trust (&gt;= 0.9)</div>
+        <div class="legend-item"><div class="color-box" style="background:#ffbb00;"></div> Medium Trust (0.6 - 0.8)</div>
+        <div class="legend-item"><div class="color-box" style="background:#ff3366;"></div> Low Trust (&lt; 0.6)</div>
+    </div>
+    <div id="2d-graph"></div>
+    <script>
+        const graphData = {graph_data};
+        
+        const highlightNodes = new Set();
+        const highlightLinks = new Set();
+        let hoverNode = null;
+
+        const Graph = ForceGraph()
+          (document.getElementById('2d-graph'))
+            .graphData(graphData)
+            .nodeCanvasObject((node, ctx, globalScale) => {{
+                const isHighlighted = hoverNode === node || highlightNodes.has(node);
+                const isDimmed = hoverNode && !isHighlighted;
+                
+                const label = node.name;
+                const fontSize = isHighlighted ? 16 : 12;
+                ctx.font = `bold ${{fontSize}}px Sans-Serif`;
+                const textWidth = ctx.measureText(label).width;
+                const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.8);
+
+                ctx.fillStyle = isDimmed ? 'rgba(50, 50, 50, 0.2)' : node.color;
+                ctx.beginPath();
+                if (ctx.roundRect) {{
+                    ctx.roundRect(
+                        node.x - bckgDimensions[0] / 2, 
+                        node.y - bckgDimensions[1] / 2, 
+                        bckgDimensions[0], 
+                        bckgDimensions[1], 
+                        4
+                    );
+                }} else {{
+                    ctx.rect(
+                        node.x - bckgDimensions[0] / 2, 
+                        node.y - bckgDimensions[1] / 2, 
+                        bckgDimensions[0], 
+                        bckgDimensions[1]
+                    );
+                }}
+                ctx.fill();
+                
+                if (isHighlighted) {{
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }}
+
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = isDimmed ? 'rgba(11, 13, 23, 0.5)' : '#0b0d17';
+                ctx.fillText(label, node.x, node.y);
+
+                node.__bckgDimensions = bckgDimensions;
+            }})
+            .nodePointerAreaPaint((node, color, ctx) => {{
+                ctx.fillStyle = color;
+                const bckgDimensions = node.__bckgDimensions;
+                bckgDimensions && ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, bckgDimensions[0], bckgDimensions[1]);
+            }})
+            .linkColor(link => highlightLinks.has(link) ? '#00ffa6' : 'rgba(166, 172, 205, 0.2)')
+            .linkWidth(link => highlightLinks.has(link) ? 2 : 0.5)
+            .linkDirectionalArrowLength(link => highlightLinks.has(link) ? 6 : 4)
+            .linkDirectionalArrowRelPos(1)
+            .linkDirectionalParticles(link => highlightLinks.has(link) ? 4 : 0)
+            .linkDirectionalParticleWidth(3)
+            .onNodeHover(node => {{
+                highlightNodes.clear();
+                highlightLinks.clear();
+                
+                if (node) {{
+                    highlightNodes.add(node);
+                    graphData.links.forEach(link => {{
+                        const src = link.source.id || link.source;
+                        const tgt = link.target.id || link.target;
+                        const n_id = node.id || node;
+                        if (src === n_id || tgt === n_id) {{
+                            highlightLinks.add(link);
+                            highlightNodes.add(src === n_id ? link.target : link.source);
+                        }}
+                    }});
+                }}
+
+                hoverNode = node || null;
+                Graph.nodeCanvasObject(Graph.nodeCanvasObject());
+            }})
+            .onNodeClick(node => {{
+                Graph.centerAt(node.x, node.y, 1000);
+                Graph.zoom(3, 1000);
+            }});
+            
+        // 2D Physics - Massive repulsion, longer links, and NO center gravity so it completely unclutters!
+        Graph.d3Force('charge').strength(-3000);
+        Graph.d3Force('link').distance(200);
+        Graph.d3Force('center', null);
+        
+        let initialZoom = false;
+        Graph.onEngineStop(() => {{
+            if (!initialZoom) {{
+                Graph.zoomToFit(400, 50);
+                initialZoom = true;
+            }}
+        }});
+        
+        // Ensure it always utilizes the full screen perfectly
+        window.addEventListener('resize', () => {{
+            Graph.width(window.innerWidth).height(window.innerHeight);
+        }});
+        
+        // Set initial full screen
+        Graph.width(window.innerWidth).height(window.innerHeight);
+    </script>
+</body>
+</html>
+"""
+
+            with open(args.output_file, "w", encoding="utf-8") as f:
+                f.write(html_content)
+                
+            print(f"✅ GPU-Accelerated Graph exported to {args.output_file}")
 
         elif args.command == "export_html":
             graph = engine.read_graph(db_path)
