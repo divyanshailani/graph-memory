@@ -25,6 +25,8 @@ def add_node(workspace_dir: str, id: str, type: str, verification_method: str, a
         attributes: A JSON string containing key-value metadata (default: "{}")
     """
     _set_workspace(workspace_dir)
+    if not attributes.strip():
+        attributes = "{}"
     try:
         attrs = json.loads(attributes)
     except json.JSONDecodeError:
@@ -50,6 +52,8 @@ def add_relation(workspace_dir: str, source: str, relation: str, target: str, ve
         attributes: A JSON string containing key-value metadata (default: "{}")
     """
     _set_workspace(workspace_dir)
+    if not attributes.strip():
+        attributes = "{}"
     try:
         attrs = json.loads(attributes)
     except json.JSONDecodeError:

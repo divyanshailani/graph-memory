@@ -101,9 +101,10 @@ def add_relation(source_id, relation_type, target_id, verification_method, attri
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Ensure source and target nodes exist minimally
-    cursor.execute('INSERT OR IGNORE INTO nodes (id, type, attributes) VALUES (?, ?, ?)', (source_id, 'Unknown', json.dumps({"verification_method": "assumed"})))
-    cursor.execute('INSERT OR IGNORE INTO nodes (id, type, attributes) VALUES (?, ?, ?)', (target_id, 'Unknown', json.dumps({"verification_method": "assumed"})))
+    now_iso = datetime.now(timezone.utc).isoformat()
+    dummy_attrs = json.dumps({"verification_method": "assumed", "created_at": now_iso})
+    cursor.execute('INSERT OR IGNORE INTO nodes (id, type, attributes) VALUES (?, ?, ?)', (source_id, 'Unknown', dummy_attrs))
+    cursor.execute('INSERT OR IGNORE INTO nodes (id, type, attributes) VALUES (?, ?, ?)', (target_id, 'Unknown', dummy_attrs))
     
     cursor.execute('''
         INSERT INTO relations (source_id, relation_type, target_id, attributes)
