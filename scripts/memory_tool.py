@@ -51,20 +51,20 @@ def cmd_export_html(args):
         
         if not last_verified:
             is_stale = True
-            warning += "⚠️ UNVERIFIED / LEGACY NODE\n"
+            warning += "[UNVERIFIED / LEGACY NODE]\n"
         else:
             try:
                 lv_dt = datetime.fromisoformat(last_verified)
                 age_days = (now_ts - lv_dt.timestamp()) / 86400
                 if age_days > 3:
                     is_stale = True
-                    warning += f"⚠️ STALE (Verified {age_days:.1f} days ago)\n"
+                    warning += f"[STALE] (Verified {age_days:.1f} days ago)\n"
             except:
                 is_stale = True
-                warning += "⚠️ INVALID TIMESTAMP\n"
+                warning += "[INVALID TIMESTAMP]\n"
                 
         if verification_method in ['agent_self_report', 'assumed', 'unknown']:
-            warning += f"⚠️ WEAK VERIFICATION: {verification_method}\n"
+            warning += f"[WEAK VERIFICATION]: {verification_method}\n"
             is_stale = True # Treat weak verification as low trust/stale visually
             
         node_data = {

@@ -60,7 +60,7 @@ Add the server in your MCP settings or `config.toml`:
 
 ---
 
-## 🔥 Pro-Tip: Enabling "Live" Auto-Updates
+## Pro-Tip: Enabling "Live" Auto-Updates
 In Antigravity (AG), Graph-Memory is deeply integrated, meaning the agent automatically updates the database in the background without you asking.
 
 **To get this same "Live Auto-Update" behavior in Claude Desktop, Cursor, or Codex**, you must paste the following rule into your **Project Instructions**, `.cursorrules`, or `.codexrules` file:
