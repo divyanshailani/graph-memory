@@ -26,6 +26,8 @@ def main():
     add_node_parser.add_argument("label", type=str, help="The label/type for the node")
     add_node_parser.add_argument("properties", type=str, nargs="?", default="{}", help="JSON properties (optional)")
     add_node_parser.add_argument("--trust", type=float, default=1.0, help="Trust score for the node (default: 1.0)")
+    add_node_parser.add_argument("--link-to", type=str, default=None, help="Optional parent node ID to link to atomically")
+    add_node_parser.add_argument("--link-type", type=str, default="PART_OF", help="Relation type if --link-to is provided (default: PART_OF)")
 
     # add_relation (Maps to create_relations)
     add_relation_parser = subparsers.add_parser("add_relation", help="Add a relationship between nodes")
@@ -39,6 +41,10 @@ def main():
     search_parser = subparsers.add_parser("search", help="Full-text search across nodes")
     search_parser.add_argument("query", type=str, help="Search query")
     search_parser.add_argument("--min-trust", type=float, default=0.6, help="Minimum trust score filter (default: 0.6)")
+
+    # sweep
+    sweep_parser = subparsers.add_parser("sweep", help="Sweep and soft-delete orphaned nodes")
+    sweep_parser.add_argument("--root", type=str, default="Project_Graph_Memory", help="Root node ID to protect from sweeping (default: Project_Graph_Memory)")
 
     # import_md
     import_md_parser = subparsers.add_parser("import", help="Import legacy markdown files into the graph")
@@ -64,7 +70,15 @@ def main():
 
         elif args.command == "add_node":
             props = json.loads(args.properties)
-            engine.get_or_create_node(db_path, args.node_id, args.label, props, trust_score=args.trust)
+            engine.get_or_create_node(
+                db_path, 
+                args.node_id, 
+                args.label, 
+                props, 
+                trust_score=args.trust,
+                link_to=args.link_to,
+                link_type=args.link_type
+            )
             print(f"Node '{args.node_id}' added/updated successfully.")
 
         elif args.command == "add_relation":
@@ -75,6 +89,10 @@ def main():
         elif args.command == "search":
             results = engine.search_nodes(db_path, args.query, min_trust=args.min_trust)
             print(json.dumps(results, indent=2))
+
+        elif args.command == "sweep":
+            count = engine.sweep_orphans(db_path, root_id=args.root)
+            print(f"Sweep complete. Soft-deleted {count} orphaned node(s).")
 
         elif args.command == "import":
             md_files = glob.glob(os.path.join(args.directory, "**/*.md"), recursive=True)

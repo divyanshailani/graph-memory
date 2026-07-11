@@ -192,10 +192,11 @@ def search_nodes(db_path: str, query: str, min_trust: float = 0.6) -> list:
                 
         return results
 
-def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict = None, trust_score: float = 1.0) -> str:
+def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict = None, trust_score: float = 1.0, link_to: str = None, link_type: str = "PART_OF") -> str:
     """
     Creates a node, or returns an existing one to prevent fragmentation.
     Implements the "Supersession" problem solution.
+    Optionally links the node to another node atomically.
     """
     init_db(db_path)
     props = properties or {}
@@ -214,15 +215,38 @@ def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict 
                     SET properties = ?, updated_at = ?, access_count = access_count + 1, trust_score = MAX(trust_score, ?)
                     WHERE id = ?
                 """, (json.dumps(existing_props), now_iso(), trust_score, node_id))
-                return node_id
-            
-            # Insert new node
-            conn.execute("""
-                INSERT INTO Nodes (id, label, properties, created_at, updated_at, trust_score)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (node_id, label, json.dumps(props), now_iso(), now_iso(), trust_score))
+            else:
+                # Insert new node
+                conn.execute("""
+                    INSERT INTO Nodes (id, label, properties, created_at, updated_at, trust_score)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (node_id, label, json.dumps(props), now_iso(), now_iso(), trust_score))
+                
+            # Atomic Linking
+            if link_to:
+                conn.execute("""
+                    INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, trust_score)
+                    VALUES (?, ?, ?, '{}', ?, ?)
+                    ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+                        trust_score = MAX(trust_score, excluded.trust_score)
+                """, (node_id, link_to, link_type, now_iso(), trust_score))
             
             return node_id
+
+def sweep_orphans(db_path: str, root_id: str = "Project_Graph_Memory") -> int:
+    """Soft-deletes all nodes that have 0 edges, excluding the root node. Returns rows affected."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            cursor = conn.execute("""
+                UPDATE Nodes 
+                SET is_deleted = 1, updated_at = ?
+                WHERE id != ? 
+                  AND is_deleted = 0
+                  AND NOT EXISTS (SELECT 1 FROM Edges WHERE source_id = Nodes.id)
+                  AND NOT EXISTS (SELECT 1 FROM Edges WHERE target_id = Nodes.id)
+            """, (now_iso(), root_id))
+            return cursor.rowcount
 
 def create_relation(db_path: str, source_id: str, target_id: str, relation_type: str, properties: dict = None, trust_score: float = 1.0):
     """
