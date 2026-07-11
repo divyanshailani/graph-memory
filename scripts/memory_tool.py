@@ -75,14 +75,14 @@ def cmd_export_html(args):
         }
         
         if is_stale:
-            # Override group color to faded orange/red for untrusted nodes
+            # Override group color to vibrant alert orange/red for untrusted nodes
             node_data["color"] = {
-                "background": "#4a2a22",
-                "border": "#cc5500",
-                "highlight": { "background": "#6b392a", "border": "#ffaa00" },
-                "hover": { "background": "#6b392a", "border": "#ffaa00" }
+                "background": "#ff6b6b",
+                "border": "#ff0000",
+                "highlight": { "background": "#ff8787", "border": "#ff0000" },
+                "hover": { "background": "#ff8787", "border": "#ff0000" }
             }
-            node_data["font"] = { "color": "rgba(255, 150, 100, 0.9)" }
+            node_data["font"] = { "color": "#ffffff" }
             
         vis_nodes.append(node_data)
         
