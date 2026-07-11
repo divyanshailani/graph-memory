@@ -32,5 +32,32 @@ python3 scripts/memory_tool.py add_relation "Server_VM" "HAS_DB" "Postgres_DB"
 python3 scripts/memory_tool.py export_html
 ```
 
+## Universal Setup (MCP Server)
+Graph Memory comes with a Model Context Protocol (MCP) server so it can be universally accessed by any AI coding framework (Claude Desktop, Cursor, Aider, etc.). Since all frameworks store data in `.agents/graph_memory.sqlite` relative to the workspace, they all share the exact same brain!
+
+First, ensure you have the `mcp` SDK installed globally:
+```bash
+pip install mcp
+```
+
+### Claude Desktop
+Add the following to your `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "graph_memory": {
+      "command": "python3",
+      "args": ["/absolute/path/to/Graph memory/scripts/mcp_server.py"]
+    }
+  }
+}
+```
+
+### Cursor / Codeium
+Add the server in your MCP settings:
+- **Type**: command
+- **Command**: `python3 "/absolute/path/to/Graph memory/scripts/mcp_server.py"`
+
+
 ## Data Storage
 The SQLite database and exported HTML files are stored safely out of version control in the `.agents/` directory of the workspace where the agent is running.
