@@ -1,6 +1,5 @@
 # Epistemic Graph Memory
 
-![Epistemic Graph Memory 2D UI Hover State](assets/screenshot1.png)
 ![Epistemic Graph Memory 2D UI Global View](assets/screenshot2.png)
 
 A universal, long-term project memory tool utilizing a local SQLite graph structure to solve context amnesia for AI coding agents.
