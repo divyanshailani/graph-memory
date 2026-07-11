@@ -250,8 +250,6 @@ def main():
             .linkWidth(link => highlightLinks.has(link) ? 2 : 0.5)
             .linkDirectionalArrowLength(link => highlightLinks.has(link) ? 6 : 4)
             .linkDirectionalArrowRelPos(1)
-            .linkDirectionalParticles(link => highlightLinks.has(link) ? 4 : 0)
-            .linkDirectionalParticleWidth(3)
             .onNodeHover(node => {{
                 highlightNodes.clear();
                 highlightLinks.clear();
@@ -267,6 +265,12 @@ def main():
                             highlightNodes.add(src === n_id ? link.target : link.source);
                         }}
                     }});
+                    // Enable particles only during hover so GPU can sleep otherwise
+                    Graph.linkDirectionalParticles(link => highlightLinks.has(link) ? 4 : 0);
+                    Graph.linkDirectionalParticleWidth(3);
+                }} else {{
+                    // Completely disable particles when idle to allow render loop to pause
+                    Graph.linkDirectionalParticles(0);
                 }}
 
                 hoverNode = node || null;
