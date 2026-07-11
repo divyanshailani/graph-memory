@@ -278,9 +278,11 @@ def main():
             }});
             
         // 2D Physics - Massive repulsion, longer links, and NO center gravity so it completely unclutters!
+        // We set cooldownTicks so the engine fully powers down the GPU after 5 seconds of untangling.
         Graph.d3Force('charge').strength(-3000);
         Graph.d3Force('link').distance(200);
         Graph.d3Force('center', null);
+        Graph.cooldownTicks(300);
         
         let initialZoom = false;
         Graph.onEngineStop(() => {{
