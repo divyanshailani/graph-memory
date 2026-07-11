@@ -1,6 +1,10 @@
 import sqlite3
 import json
 import os
+from datetime import datetime, timezone
+
+VERIFICATION_METHODS = {'source_read', 'test_executed', 'endpoint_tested', 'agent_self_report', 'assumed'}
+STRONG_METHODS = {'source_read', 'test_executed', 'endpoint_tested'}
 
 def get_db_path():
     # Store the DB in the .agents directory of the current workspace
@@ -38,11 +42,41 @@ def init_db():
     conn.commit()
     conn.close()
 
-def add_node(node_id, node_type, attributes=None):
+def add_node(node_id, node_type, verification_method, attributes=None):
+    if verification_method not in VERIFICATION_METHODS:
+        raise ValueError(f"Invalid verification_method: {verification_method}. Must be one of: {VERIFICATION_METHODS}")
+        
     if attributes is None:
         attributes = {}
+        
     conn = get_connection()
     cursor = conn.cursor()
+    
+    # Fetch existing node to preserve created_at
+    cursor.execute('SELECT attributes FROM nodes WHERE id = ?', (node_id,))
+    row = cursor.fetchone()
+    
+    now_iso = datetime.now(timezone.utc).isoformat()
+    
+    if row:
+        try:
+            existing_attrs = json.loads(row['attributes'])
+        except:
+            existing_attrs = {}
+            
+        attributes['created_at'] = existing_attrs.get('created_at', now_iso)
+        if verification_method in STRONG_METHODS:
+            attributes['last_verified_at'] = now_iso
+        else:
+            if 'last_verified_at' in existing_attrs:
+                attributes['last_verified_at'] = existing_attrs['last_verified_at']
+    else:
+        attributes['created_at'] = now_iso
+        if verification_method in STRONG_METHODS:
+            attributes['last_verified_at'] = now_iso
+            
+    attributes['verification_method'] = verification_method
+            
     cursor.execute('''
         INSERT INTO nodes (id, type, attributes)
         VALUES (?, ?, ?)
@@ -51,15 +85,25 @@ def add_node(node_id, node_type, attributes=None):
     conn.commit()
     conn.close()
 
-def add_relation(source_id, relation_type, target_id, attributes=None):
+def add_relation(source_id, relation_type, target_id, verification_method, attributes=None):
+    if verification_method not in VERIFICATION_METHODS:
+        raise ValueError(f"Invalid verification_method: {verification_method}. Must be one of: {VERIFICATION_METHODS}")
+        
     if attributes is None:
         attributes = {}
+        
+    now_iso = datetime.now(timezone.utc).isoformat()
+    attributes['created_at'] = now_iso
+    if verification_method in STRONG_METHODS:
+        attributes['last_verified_at'] = now_iso
+    attributes['verification_method'] = verification_method
+        
     conn = get_connection()
     cursor = conn.cursor()
     
     # Ensure source and target nodes exist minimally
-    cursor.execute('INSERT OR IGNORE INTO nodes (id, type, attributes) VALUES (?, ?, ?)', (source_id, 'Unknown', '{}'))
-    cursor.execute('INSERT OR IGNORE INTO nodes (id, type, attributes) VALUES (?, ?, ?)', (target_id, 'Unknown', '{}'))
+    cursor.execute('INSERT OR IGNORE INTO nodes (id, type, attributes) VALUES (?, ?, ?)', (source_id, 'Unknown', json.dumps({"verification_method": "assumed"})))
+    cursor.execute('INSERT OR IGNORE INTO nodes (id, type, attributes) VALUES (?, ?, ?)', (target_id, 'Unknown', json.dumps({"verification_method": "assumed"})))
     
     cursor.execute('''
         INSERT INTO relations (source_id, relation_type, target_id, attributes)

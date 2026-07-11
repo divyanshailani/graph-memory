@@ -7,12 +7,30 @@ A universal, long-term project memory tool utilizing a local SQLite graph struct
 ## Overview
 When AI agents work on complex software projects over long periods, flat markdown files like `project_memory.md` often fail because they lack structural context and the agent forgets the relationships between different files, tasks, and infrastructure.
 
-**Graph-Memory** solves this by providing a relational graph database (SQLite-backed) that your agents interact with to store long-term architecture.
+**Graph-Memory** solves this by providing a **Trust-Weighted Epistemic Graph** database (SQLite-backed) that your agents interact with to store long-term architecture. It forces agents to provide confidence levels on the facts they log, entirely preventing silent hallucinations.
+
+## File Structure
+
+```
+Graph memory/
+├── .agents/                    # Database and exports (auto-generated per workspace)
+│   ├── graph_memory.sqlite     # The isolated SQLite brain
+│   └── graph_memory_vis.html   # The interactive visual graph
+├── scripts/
+│   ├── db.py                   # Core SQLite bindings, schema, and epistemic logic
+│   ├── mcp_server.py           # The Universal Model Context Protocol (MCP) Server
+│   └── memory_tool.py          # The CLI tool & HTML Visualizer
+├── SKILL.md                    # Antigravity native skill instructions and rules
+├── README.md                   # This documentation
+├── CHANGELOG.md                # Version history
+└── ISSUES.md                   # Known bugs and future roadmap
+```
 
 ## Features
+- **Trust-Weighted Epistemic Graph**: The graph strictly tracks *when* a fact was logged, and *how* it was verified. If an agent just assumes a fact, the graph flags it as stale. It only trusts explicit code reads and executed tests.
 - **Idempotent Nodes & Edges**: Agents log Tasks, Decisions, Infrastructure, and Bugs as connected nodes.
 - **Strict Modeling Rules**: Rules enforced via instructions ensure no orphaned nodes and strict typing.
-- **Obsidian-style Vis.js HTML Export**: Generate beautiful, physics-based, dark-mode graph visualizations in your browser.
+- **Obsidian-style Vis.js HTML Export**: Generate beautiful, physics-based, dark-mode graph visualizations in your browser. Stale or hallucinated nodes are visually flagged.
 - **Universal State**: The database is stored locally in `.agents/graph_memory.sqlite`, meaning Claude Desktop, Cursor, and Antigravity can all read/write to the exact same brain simultaneously.
 
 ## Universal Setup (MCP Server)
@@ -69,13 +87,13 @@ ln -s "/path/to/Graph memory" ~/.gemini/config/skills/graph_memory
 ```
 
 ## CLI Usage
-If you prefer terminal commands, you can use the script directly:
+If you prefer terminal commands, you can use the script directly. Note that `verification_method` is strictly required:
 ```bash
 # Add a Node
-python3 scripts/memory_tool.py add_node "Postgres_DB" "Infrastructure" '{"ip": "192.168.1.5"}'
+python3 scripts/memory_tool.py add_node "Postgres_DB" "Infrastructure" "source_read" '{"ip": "192.168.1.5"}'
 
 # Add a Relation
-python3 scripts/memory_tool.py add_relation "Server_VM" "HAS_DB" "Postgres_DB"
+python3 scripts/memory_tool.py add_relation "Server_VM" "HAS_DB" "Postgres_DB" "assumed"
 
 # Generate HTML Graph Visualization
 python3 scripts/memory_tool.py export_html

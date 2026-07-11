@@ -2,17 +2,26 @@ import sys
 import json
 import os
 import argparse
+from datetime import datetime, timezone
 from db import init_db, add_node, add_relation, get_node, get_all_nodes, get_all_relations
 
 def cmd_add_node(args):
     attrs = json.loads(args.attributes) if args.attributes else {}
-    add_node(args.id, args.type, attrs)
-    print(f"Added node: {args.id} (Type: {args.type})")
+    try:
+        add_node(args.id, args.type, args.verification_method, attrs)
+        print(f"Added node: {args.id} (Type: {args.type}, Verification: {args.verification_method})")
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 def cmd_add_relation(args):
     attrs = json.loads(args.attributes) if args.attributes else {}
-    add_relation(args.source, args.relation, args.target, attrs)
-    print(f"Added relation: {args.source} -[{args.relation}]-> {args.target}")
+    try:
+        add_relation(args.source, args.relation, args.target, args.verification_method, attrs)
+        print(f"Added relation: {args.source} -[{args.relation}]-> {args.target} (Verification: {args.verification_method})")
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 def cmd_get_node(args):
     data = get_node(args.id)
@@ -25,14 +34,57 @@ def cmd_export_html(args):
     nodes = get_all_nodes()
     relations = get_all_relations()
     
+    now_ts = datetime.now(timezone.utc).timestamp()
+    
     vis_nodes = []
     for n in nodes:
-        vis_nodes.append({
+        try:
+            attrs = json.loads(n['attributes'])
+        except:
+            attrs = {}
+            
+        last_verified = attrs.get('last_verified_at')
+        verification_method = attrs.get('verification_method', 'unknown')
+        
+        is_stale = False
+        warning = ""
+        
+        if not last_verified:
+            is_stale = True
+            warning += "⚠️ UNVERIFIED / LEGACY NODE\n"
+        else:
+            try:
+                lv_dt = datetime.fromisoformat(last_verified)
+                age_days = (now_ts - lv_dt.timestamp()) / 86400
+                if age_days > 3:
+                    is_stale = True
+                    warning += f"⚠️ STALE (Verified {age_days:.1f} days ago)\n"
+            except:
+                is_stale = True
+                warning += "⚠️ INVALID TIMESTAMP\n"
+                
+        if verification_method in ['agent_self_report', 'assumed', 'unknown']:
+            warning += f"⚠️ WEAK VERIFICATION: {verification_method}\n"
+            is_stale = True # Treat weak verification as low trust/stale visually
+            
+        node_data = {
             "id": n["id"],
             "label": n["id"],
-            "title": f"Type: {n['type']}\n\n{n['attributes']}",
+            "title": f"{warning}Type: {n['type']}\nVerified via: {verification_method}\n\n{json.dumps(attrs, indent=2)}",
             "group": n["type"]
-        })
+        }
+        
+        if is_stale:
+            # Override group color to faded orange/red for untrusted nodes
+            node_data["color"] = {
+                "background": "#4a2a22",
+                "border": "#cc5500",
+                "highlight": { "background": "#6b392a", "border": "#ffaa00" },
+                "hover": { "background": "#6b392a", "border": "#ffaa00" }
+            }
+            node_data["font"] = { "color": "rgba(255, 150, 100, 0.9)" }
+            
+        vis_nodes.append(node_data)
         
     vis_edges = []
     for r in relations:
@@ -46,7 +98,7 @@ def cmd_export_html(args):
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Graph Memory Visualization</title>
+        <title>Trust-Weighted Graph Memory Visualization</title>
         <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
         <style type="text/css">
@@ -138,18 +190,13 @@ def cmd_export_html(args):
     """
     
     out_path = os.path.join(os.getcwd(), '.agents', 'graph_memory_vis.html')
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, 'w') as f:
         f.write(html_content)
     print(f"Exported HTML visualization to {out_path}")
-    
-    # Try to open it
-    try:
-        import webbrowser
-        webbrowser.open('file://' + os.path.abspath(out_path))
-    except Exception:
-        pass
 
 def cmd_export_obsidian(args):
+    # Obsidian export remains mostly unchanged, could also inject staleness tags if needed.
     nodes = get_all_nodes()
     relations = get_all_relations()
     
@@ -161,7 +208,6 @@ def cmd_export_obsidian(args):
         safe_name = "".join([c for c in node_id if c.isalpha() or c.isdigit() or c==' ' or c=='_']).rstrip()
         filename = os.path.join(export_dir, f"{safe_name}.md")
         
-        # Find related
         outgoing = [r for r in relations if r["source_id"] == node_id]
         incoming = [r for r in relations if r["target_id"] == node_id]
         
@@ -200,12 +246,14 @@ def main():
     p_add_node = subparsers.add_parser("add_node")
     p_add_node.add_argument("id")
     p_add_node.add_argument("type")
+    p_add_node.add_argument("verification_method", help="Required enum: 'source_read', 'test_executed', 'endpoint_tested', 'agent_self_report', 'assumed'")
     p_add_node.add_argument("attributes", nargs="?", default="{}")
     
     p_add_rel = subparsers.add_parser("add_relation")
     p_add_rel.add_argument("source")
     p_add_rel.add_argument("relation")
     p_add_rel.add_argument("target")
+    p_add_rel.add_argument("verification_method", help="Required enum: 'source_read', 'test_executed', 'endpoint_tested', 'agent_self_report', 'assumed'")
     p_add_rel.add_argument("attributes", nargs="?", default="{}")
     
     p_get = subparsers.add_parser("get_node")
