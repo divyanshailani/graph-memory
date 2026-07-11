@@ -21,6 +21,22 @@ When AI agents work on massive legacy ("Brownfield") codebases, traditional RAG 
 - **Obsidian-style Vis.js HTML Export**: Generate beautiful, physics-based, dark-mode graph visualizations in your browser. Stale or hallucinated nodes are visually flagged.
 - **Universal State**: The database is stored locally in `.agents/graph_memory.sqlite`, meaning all MCP-compatible tools can read/write to the exact same brain simultaneously.
 
+## Why Epistemic Graph-Memory Wins (Addressing the Critiques)
+
+If you are an AI architect, you have probably heard these three critiques of Agentic Memory systems. Here is exactly how we engineered past them:
+
+**1. "Just dump 150k tokens into the context window, it's enough."**
+* **The Problem:** Passing 150,000 tokens on *every single request* is extremely slow and expensive. More importantly, LLMs suffer from the "Needle in a Haystack" (Lost in the Middle) phenomenon. If a critical architectural detail is buried at token 75,000, the AI often ignores it.
+* **Our Solution:** Epistemic Graph Memory scales infinitely. When your agent needs to understand a module, it doesn't read the whole project. It hits the FTS5 SQLite index, pulls the structurally perfect `MOC` node and its immediate neighbors, and sends a highly concentrated, perfectly relevant 2,000-token prompt.
+
+**2. "Graph memory is a pain because updating it is hard and messy."**
+* **The Problem:** Traditional Graph RAG is notoriously hard to update. If a developer renames a file or deletes a function, relying on messy LLM guesses to update the graph usually results in a tangled web of dead links.
+* **Our Solution:** We built the **Skeleton-to-Meat Architecture** and the **Orphan Sweeper**. We do *not* rely on AI guesses for the structural graph. We use a deterministic AST Parser (`tree-sitter`). When the codebase changes, our engine mathematically guarantees the structure is updated natively, and the Garbage Collector cleanly sweeps away and soft-deletes isolated nodes. It's driven by compiler logic, not AI guesses.
+
+**3. "Automated agents hallucinate. A 0.1% error rate will eventually compound and pollute the graph."**
+* **The Problem:** If an autonomous agent auto-updates the graph and hallucinates a connection even 0.1% of the time, over thousands of updates, the graph becomes a polluted mess of false memories that poisons the AI's reasoning forever.
+* **Our Solution:** **Strict Trust-Weighted Scoring (`--trust`)**. We architected the system to strictly separate deterministic facts from AI-generated assumptions. Hard compiler facts (AST parsers) are assigned `Trust = 1.0`. AI-generated assumptions and automated agent actions are assigned `Trust = 0.6`. Because our query engine utilizes a `--min-trust` filter, those 0.1% automated errors are permanently quarantined at a low trust level. They literally cannot compound or pollute the core truth of the graph.
+
 ## Quickstart
 
 ### 1. Installation
