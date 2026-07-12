@@ -29,6 +29,7 @@ def main():
     add_node_parser.add_argument("--trust", type=float, default=1.0, help="Trust score for the node (default: 1.0)")
     add_node_parser.add_argument("--link-to", type=str, default=None, help="Optional parent node ID to link to atomically")
     add_node_parser.add_argument("--link-type", type=str, default="PART_OF", help="Relation type if --link-to is provided (default: PART_OF)")
+    add_node_parser.add_argument("--method", type=str, default="unknown", help="Verification method for trust audit trail")
 
     # add_relation (Maps to create_relations)
     add_relation_parser = subparsers.add_parser("add_relation", help="Add a relationship between nodes")
@@ -37,6 +38,7 @@ def main():
     add_relation_parser.add_argument("target_id", type=str, help="Target node ID")
     add_relation_parser.add_argument("properties", type=str, nargs="?", default="{}", help="JSON properties (optional)")
     add_relation_parser.add_argument("--trust", type=float, default=1.0, help="Trust score for the relation (default: 1.0)")
+    add_relation_parser.add_argument("--method", type=str, default="unknown", help="Verification method for trust audit trail")
 
     # search
     search_parser = subparsers.add_parser("search", help="Full-text search across nodes")
@@ -46,6 +48,10 @@ def main():
     # sweep
     sweep_parser = subparsers.add_parser("sweep", help="Sweep and soft-delete orphaned nodes")
     sweep_parser.add_argument("--root", type=str, default="Project_Graph_Memory", help="Root node ID to protect from sweeping (default: Project_Graph_Memory)")
+
+    # decay-trust
+    decay_parser = subparsers.add_parser("decay-trust", help="Decay the trust score of stale nodes and edges")
+    decay_parser.add_argument("--days", type=int, default=3, help="Threshold in days before trust decays (default: 3)")
 
     # Import
     import_parser = subparsers.add_parser("import", help="Import legacy Markdown files (.md) into the graph")
@@ -88,6 +94,7 @@ def main():
                 args.label, 
                 props, 
                 trust_score=args.trust,
+                verification_method=args.method,
                 link_to=args.link_to,
                 link_type=args.link_type
             )
@@ -95,7 +102,7 @@ def main():
 
         elif args.command == "add_relation":
             props = json.loads(args.properties)
-            engine.create_relation(db_path, args.source_id, args.target_id, args.relation_type, props, trust_score=args.trust)
+            engine.create_relation(db_path, args.source_id, args.target_id, args.relation_type, props, trust_score=args.trust, verification_method=args.method)
             print(f"Relation created: {args.source_id} -[{args.relation_type}]-> {args.target_id}")
 
         elif args.command == "search":
@@ -105,6 +112,15 @@ def main():
         elif args.command == "sweep":
             count = engine.sweep_orphans(db_path, root_id=args.root)
             print(f"Sweep complete. Soft-deleted {count} orphaned node(s).")
+
+        elif args.command == "decay-trust":
+            with engine.get_connection(db_path) as conn:
+                with engine.write_transaction(conn):
+                    cursor = conn.execute(f"UPDATE Nodes SET trust_score = MAX(0.0, trust_score - 0.1) WHERE last_verified_at < date('now', '-{args.days} days') AND trust_score > 0.0 AND is_deleted = 0")
+                    node_count = cursor.rowcount
+                    cursor = conn.execute(f"UPDATE Edges SET trust_score = MAX(0.0, trust_score - 0.1) WHERE last_verified_at < date('now', '-{args.days} days') AND trust_score > 0.0")
+                    edge_count = cursor.rowcount
+            print(f"Decayed trust for {node_count} nodes and {edge_count} edges older than {args.days} days.")
 
         elif args.command == "import":
             md_files = glob.glob(os.path.join(args.directory, "**/*.md"), recursive=True)
@@ -146,7 +162,7 @@ def main():
                         "val": 1.5 if label == 'Domain' else 0.5
                     })
                     
-                db_edges = conn.execute("SELECT source_id, target_id, relation_type FROM Edges WHERE status = 'active'").fetchall()
+                db_edges = conn.execute("SELECT e.source_id, e.target_id, e.relation_type FROM Edges e JOIN Nodes s ON s.id = e.source_id JOIN Nodes t ON t.id = e.target_id WHERE e.status = 'active' AND s.is_deleted = 0 AND t.is_deleted = 0").fetchall()
                 for src, tgt, rel in db_edges:
                     links.append({
                         "source": src,

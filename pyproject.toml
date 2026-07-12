@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "epistemic-graph-memory"
-version = "1.6.2"
+version = "1.6.3"
 authors = [
   { name="Divyansh Ailani" },
 ]
@@ -38,3 +38,5 @@ all = [
 [project.scripts]
 graph-memory = "graph_memory.cli:main"
 graph-memory-mcp = "graph_memory.mcp.server:main"
+[tool.setuptools]
+packages = ["graph_memory"]

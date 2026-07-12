@@ -22,12 +22,12 @@ You **must** use the `--trust` flag.
 - **1.0**: Verified hard facts (e.g., successful terminal exits, explicit human confirmation)
 - **0.6 - 0.8**: Assumptions, unverified plans, or self-reported agent claims.
 
-- **Add a Node (Atomic Linking):** `graph-memory add_node <id> <type> [attributes_json] --trust <score> --link-to <parent_id> --link-type <relation>`
-  *Example:* `graph-memory add_node "Postgres_DB" "Infrastructure" '{"ip": "192.168.1.5"}' --trust 1.0 --link-to "Project_Graph_Memory" --link-type "PART_OF"`
+- **Add a Node (Atomic Linking):** `graph-memory add_node <id> <type> [attributes_json] --trust <score> --method <human|llm> --link-to <parent_id> --link-type <relation>`
+  *Example:* `graph-memory add_node "Postgres_DB" "Infrastructure" '{"ip": "192.168.1.5"}' --trust 1.0 --method human --link-to "Project_Graph_Memory" --link-type "PART_OF"`
   *Tip:* ALWAYS use `--link-to` to atomically link a new node to the graph in one command, saving tokens!
 
-- **Add a Relationship:** `graph-memory add_relation <source_id> <relation_type> <target_id> [attributes_json] --trust <score>`
-  *Example:* `graph-memory add_relation "Server_VM" "HAS_DB" "Postgres_DB" '{"verified": true}' --trust 1.0`
+- **Add a Relationship:** `graph-memory add_relation <source_id> <relation_type> <target_id> [attributes_json] --trust <score> --method <human|llm>`
+  *Example:* `graph-memory add_relation "Server_VM" "HAS_DB" "Postgres_DB" '{"verified": true}' --trust 1.0 --method human`
 
 ### 2. Querying Data
 - **Get Node & Subgraph:** `graph-memory get_node <id> --min-trust <score>`
@@ -48,6 +48,8 @@ When dropped into a massive existing project, DO NOT attempt to read 10,000 file
 ### 4. Visualizing (For the User)
 If the user wants to see the graph, generate a visualization:
 - **Export HTML:** `graph-memory export_html .agents/graph_memory_vis.html`
+- **Export Interactive UI:** `graph-memory export-3d .agents/graph_3d.html`
+  Generates an incredibly fast GPU-accelerated interactive graph with hover particle effects, dynamic auto-zooming, and automatic full-screen layouts. Perfect for massive codebases.
 
 ## When to use Graph Memory
 1. **Upon completing a task:** Log the task as a node, and relate it to the files/services it modified.
@@ -59,6 +61,7 @@ To prevent the graph from becoming cluttered, disjointed, or confusing over time
 
 1. **The "No Orphans" Rule:** EVERY time you create a new node, you MUST connect it to the graph using the `--link-to` flag on `add_node`. Do not leave nodes floating!
    - *Garbage Collection:* You should periodically run `graph-memory sweep --root <Main_Project_Node>` to automatically find and soft-delete any accidentally orphaned nodes to keep your context pristine.
+   - *Trust Decay:* Run `graph-memory decay-trust --days 3` periodically to artificially lower the trust scores of nodes and edges that haven't been verified recently. Combined with the `--trust` ratchets, this enables natural state forgetting and memory reinforcement.
 2. **Tie to the Root:** If a new node doesn't clearly connect to a specific component, tie it to the main project node using `--link-to`.
 3. **Standardized Node Types:** Stick to a consistent set of node types: `Project`, `Architecture`, `Infrastructure`, `Task`, `Decision`, `Bug`, `Feature`.
 4. **Standardized Relationship Verbs:** Use clear, uppercase verbs for relations: `IMPLEMENTS`, `DEPENDS_ON`, `FIXES`, `PART_OF`, `COMMUNICATES_WITH`, `USES`, `EXTENDS`.

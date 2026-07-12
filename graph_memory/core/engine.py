@@ -84,7 +84,8 @@ def init_db(db_path: str):
                     access_count INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'active', -- active, superseded
                     is_deleted INTEGER DEFAULT 0,
-                    trust_score FLOAT DEFAULT 1.0
+                    trust_score FLOAT DEFAULT 1.0,
+                    verification_method TEXT DEFAULT 'unknown'
                 )
             """)
             
@@ -100,6 +101,7 @@ def init_db(db_path: str):
                     last_verified_at TEXT,
                     status TEXT DEFAULT 'active', -- active, superseded
                     trust_score FLOAT DEFAULT 1.0,
+                    verification_method TEXT DEFAULT 'unknown',
                     FOREIGN KEY(source_id) REFERENCES Nodes(id) ON DELETE CASCADE,
                     FOREIGN KEY(target_id) REFERENCES Nodes(id) ON DELETE CASCADE,
                     UNIQUE(source_id, target_id, relation_type)
@@ -113,6 +115,14 @@ def init_db(db_path: str):
                 pass # Column already exists
             try:
                 conn.execute("ALTER TABLE Edges ADD COLUMN trust_score FLOAT DEFAULT 1.0")
+            except sqlite3.OperationalError:
+                pass # Column already exists
+            try:
+                conn.execute("ALTER TABLE Nodes ADD COLUMN verification_method TEXT DEFAULT 'unknown'")
+            except sqlite3.OperationalError:
+                pass # Column already exists
+            try:
+                conn.execute("ALTER TABLE Edges ADD COLUMN verification_method TEXT DEFAULT 'unknown'")
             except sqlite3.OperationalError:
                 pass # Column already exists
             
@@ -192,7 +202,7 @@ def search_nodes(db_path: str, query: str, min_trust: float = 0.6) -> list:
                 
         return results
 
-def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict = None, trust_score: float = 1.0, link_to: str = None, link_type: str = "PART_OF") -> str:
+def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict = None, trust_score: float = 1.0, verification_method: str = "unknown", link_to: str = None, link_type: str = "PART_OF") -> str:
     """
     Creates a node, or returns an existing one to prevent fragmentation.
     Implements the "Supersession" problem solution.
@@ -212,30 +222,36 @@ def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict 
                 existing_props.update(props)
                 conn.execute("""
                     UPDATE Nodes 
-                    SET properties = ?, updated_at = ?, access_count = access_count + 1, trust_score = MAX(trust_score, ?)
+                    SET properties = ?, updated_at = ?, last_verified_at = ?, access_count = access_count + 1, trust_score = MAX(trust_score, ?), verification_method = ?
                     WHERE id = ?
-                """, (json.dumps(existing_props), now_iso(), trust_score, node_id))
+                """, (json.dumps(existing_props), now_iso(), now_iso(), trust_score, verification_method, node_id))
             else:
                 # Insert new node
                 conn.execute("""
-                    INSERT INTO Nodes (id, label, properties, created_at, updated_at, trust_score)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (node_id, label, json.dumps(props), now_iso(), now_iso(), trust_score))
+                    INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (node_id, label, json.dumps(props), now_iso(), now_iso(), now_iso(), trust_score, verification_method))
                 
             # Atomic Linking
             if link_to:
                 conn.execute("""
-                    INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, trust_score)
-                    VALUES (?, ?, ?, '{}', ?, ?)
+                    INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
+                    VALUES (?, ?, ?, '{}', ?, ?, ?, ?)
                     ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+                        last_verified_at = excluded.last_verified_at,
+                        verification_method = excluded.verification_method,
                         trust_score = MAX(trust_score, excluded.trust_score)
-                """, (node_id, link_to, link_type, now_iso(), trust_score))
+                """, (node_id, link_to, link_type, now_iso(), now_iso(), trust_score, verification_method))
             
             return node_id
 
-def sweep_orphans(db_path: str, root_id: str = "Project_Graph_Memory") -> int:
-    """Soft-deletes all nodes that have 0 edges, excluding the root node. Returns rows affected."""
+def sweep_orphans(db_path: str, root_id: str = None) -> int:
+    """Soft-deletes all nodes that have 0 edges, excluding the root node if provided. Returns rows affected."""
     init_db(db_path)
+    
+    if root_id is None:
+        root_id = os.environ.get("GRAPH_MEMORY_ROOT_ID", "Project_Graph_Memory")
+        
     with get_connection(db_path) as conn:
         with write_transaction(conn):
             cursor = conn.execute("""
@@ -248,7 +264,7 @@ def sweep_orphans(db_path: str, root_id: str = "Project_Graph_Memory") -> int:
             """, (now_iso(), root_id))
             return cursor.rowcount
 
-def create_relation(db_path: str, source_id: str, target_id: str, relation_type: str, properties: dict = None, trust_score: float = 1.0):
+def create_relation(db_path: str, source_id: str, target_id: str, relation_type: str, properties: dict = None, trust_score: float = 1.0, verification_method: str = "unknown"):
     """
     Draw an edge. Composite UNIQUE constraint prevents identical duplicates.
     """
@@ -258,13 +274,14 @@ def create_relation(db_path: str, source_id: str, target_id: str, relation_type:
     with get_connection(db_path) as conn:
         with write_transaction(conn):
             conn.execute("""
-                INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, trust_score)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
                     properties = excluded.properties,
-                    last_verified_at = ?,
+                    last_verified_at = excluded.last_verified_at,
+                    verification_method = excluded.verification_method,
                     trust_score = MAX(trust_score, excluded.trust_score)
-            """, (source_id, target_id, relation_type, json.dumps(props), now_iso(), trust_score, now_iso()))
+            """, (source_id, target_id, relation_type, json.dumps(props), now_iso(), now_iso(), trust_score, verification_method))
 
 def add_observation(db_path: str, node_id: str, observation: str):
     """
@@ -326,13 +343,14 @@ def read_graph(db_path: str) -> dict:
             })
             
         edges = []
-        for row in conn.execute("SELECT source_id, target_id, relation_type, properties, trust_score FROM Edges").fetchall():
+        for row in conn.execute("SELECT e.source_id, e.target_id, e.relation_type, e.properties, e.trust_score, e.verification_method FROM Edges e JOIN Nodes s ON s.id = e.source_id JOIN Nodes t ON t.id = e.target_id WHERE s.is_deleted = 0 AND t.is_deleted = 0").fetchall():
             edges.append({
                 "source_id": row[0],
                 "target_id": row[1],
                 "relation_type": row[2],
                 "properties": json.loads(row[3]) if row[3] else {},
-                "trust_score": row[4]
+                "trust_score": row[4],
+                "verification_method": row[5]
             })
             
         return {"nodes": nodes, "edges": edges}
