@@ -170,7 +170,7 @@ def main():
                         "name": rel
                     })
 
-            graph_data = json.dumps({"nodes": nodes, "links": links})
+            graph_data = json.dumps({"nodes": nodes, "links": links}).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
             html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -375,6 +375,9 @@ def main():
                     }
                 })
                 
+            nodes_json = json.dumps(nodes_js).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+            edges_json = json.dumps(edges_js).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+                
             html_content = f"""
             <!DOCTYPE html>
             <html>
@@ -396,8 +399,8 @@ def main():
             </div>
             <div id="mynetwork"></div>
             <script type="text/javascript">
-                var nodes = new vis.DataSet({json.dumps(nodes_js)});
-                var edges = new vis.DataSet({json.dumps(edges_js)});
+                var nodes = new vis.DataSet({nodes_json});
+                var edges = new vis.DataSet({edges_json});
                 var container = document.getElementById('mynetwork');
                 var data = {{ nodes: nodes, edges: edges }};
                 var options = {{
