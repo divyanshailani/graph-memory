@@ -64,7 +64,20 @@ def load_parser(ext):
     
     try:
         ts_module = importlib.import_module(module_name)
-        lang = tree_sitter.Language(ts_module.language())
+        
+        # Handle v0.23+ breaking change for typescript and others
+        if hasattr(ts_module, "language"):
+            lang = tree_sitter.Language(ts_module.language())
+        elif hasattr(ts_module, "language_typescript") and module_name == "tree_sitter_typescript":
+            lang = tree_sitter.Language(ts_module.language_typescript())
+        else:
+            # Fallback if there are other language_* functions (e.g. language_javascript)
+            lang_func = getattr(ts_module, f"language_{module_name.split('_')[-1]}", None)
+            if lang_func:
+                lang = tree_sitter.Language(lang_func())
+            else:
+                raise AttributeError(f"Could not find language() or language_X() in {module_name}")
+                
         parser = tree_sitter.Parser(lang)
         return parser
     except ImportError:
