@@ -67,7 +67,7 @@ def generate_moc_summaries(db_path: str):
     
     moc_nodes = []
     with get_connection(db_path) as conn:
-        cursor = conn.execute("SELECT id, properties FROM Nodes WHERE label = 'MOC_Hub' AND is_deleted = 0")
+        cursor = conn.execute("SELECT id, properties FROM Nodes WHERE label = 'Fact_Node' AND json_extract(properties, '$.entity_type') = 'MOC_Hub' AND is_deleted = 0")
         for row in cursor.fetchall():
             node_id = row[0]
             props = json.loads(row[1]) if row[1] else {}
