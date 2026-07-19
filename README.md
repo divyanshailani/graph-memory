@@ -4,7 +4,7 @@
 
 A local SQLite graph database designed to track long-term state and structural context for AI coding agents.
 
-Exposed via the **Model Context Protocol (MCP)**, allowing agents (Claude Desktop, Cursor, Codex, etc.) to query and update project blueprints synchronously.
+Exposed via the **Model Context Protocol (MCP)**, allowing agents (Claude Desktop, Cursor, Codex, OpenHands, Local Ollama agents, etc.) to query and update project blueprints synchronously.
 
 ## Features
 - **AST Parsing (`ingest-code`)**: Uses Tree-sitter to map local codebases into a node-edge graph hierarchy. Supports Python, TypeScript, JavaScript, Go, and Rust.
@@ -73,6 +73,28 @@ To override the default database location:
 ```bash
 export GRAPH_MEMORY_DB_PATH="/path/to/database.sqlite"
 ```
+
+## Advanced Schema (Agent Protocols)
+
+Graph-Memory's `--trust` flag is augmented by enforcing a strict JSON metadata schema within the `[attributes_json]` field. When autonomous agents (Claude, Codex, Antigravity) log nodes and relations, they must standardize three core paradigms:
+
+1. **Multi-Agent Provenance & Tool Sourcing:**
+   Record *who* created the knowledge and *where* it came from.
+   ```json
+   {"created_by": "Claude", "source": "AST", "verified_by": "Human"}
+   ```
+
+2. **Expanded Trust Protocol:**
+   Rather than just passing a flat `--trust` float, agents inject deeper confidence metrics.
+   ```json
+   {"confidence": 0.8, "verification_source": "pytest", "last_verified": "2026-07-20"}
+   ```
+
+3. **Node Distinctions & Execution Workflows:**
+   Nodes must adhere to strict type ontologies to separate deterministic structure from history:
+   - `Fact_Node`: Deterministic ground-truth (AST, Git, filesystem).
+   - `Knowledge_Node`: Architecture, Design decisions, LLM summaries.
+   - `Episode_Node`: Execution workflows, completed task sequences ("How was this bug fixed?"). Agents link `Episode_Node` steps using `FOLLOWED_BY` edges.
 
 ## Inspiration & Lineage
 

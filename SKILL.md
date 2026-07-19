@@ -17,11 +17,11 @@ Trust scores:
 
 **Add Node:**
 `graph-memory add_node <id> <type> [attributes_json] --trust <score> --method <human|llm> --link-to <parent_id> --link-type <relation>`
-*Example:* `graph-memory add_node "Postgres_DB" "Infrastructure" '{"ip": "192.168.1.5"}' --trust 1.0 --method human --link-to "Project_Graph_Memory" --link-type "PART_OF"`
+*Example:* `graph-memory add_node "Postgres_DB" "Fact_Node" '{"ip": "192.168.1.5", "created_by": "Antigravity", "source": "AST", "confidence": 1.0}' --trust 1.0 --method human --link-to "Project_Graph_Memory" --link-type "PART_OF"`
 
 **Add Relationship:**
 `graph-memory add_relation <source_id> <relation_type> <target_id> [attributes_json] --trust <score> --method <human|llm>`
-*Example:* `graph-memory add_relation "Server_VM" "HAS_DB" "Postgres_DB" '{"verified": true}' --trust 1.0 --method human`
+*Example:* `graph-memory add_relation "Server_VM" "HAS_DB" "Postgres_DB" '{"verified_by": "pytest", "confidence": 0.9}' --trust 1.0 --method human`
 
 ### 2. Querying
 **Get Node Neighborhood:**
@@ -48,8 +48,12 @@ Uses LLM to summarize ingested structural hubs.
 
 ## Graph Modeling Best Practices
 1. **Link New Nodes:** Always use `--link-to` when calling `add_node` to prevent orphaned nodes.
-2. **Standard Types:** `Project`, `Architecture`, `Infrastructure`, `Task`, `Decision`, `Bug`, `Feature`.
-3. **Standard Relations:** `IMPLEMENTS`, `DEPENDS_ON`, `FIXES`, `PART_OF`, `COMMUNICATES_WITH`, `USES`, `EXTENDS`.
+2. **Standard Types (Strict Ontology):** 
+   - `Fact_Node`: Deterministic ground-truth (AST, Git, filesystem).
+   - `Knowledge_Node`: Architecture, Design decisions, LLM summaries.
+   - `Episode_Node`: Completed execution workflows/tasks.
+3. **Advanced Protocol (JSON):** Always inject `created_by`, `source`, `confidence`, and `verification_source` into `[attributes_json]`.
+4. **Standard Relations:** `IMPLEMENTS`, `DEPENDS_ON`, `FIXES`, `PART_OF`, `FOLLOWED_BY` (for Episodes).
 4. **Deduplication:** Check node existence before creation.
 5. **Garbage Collection:** Run `graph-memory sweep --root <Main_Project_Node>` to remove orphaned nodes.
 6. **Active Filtering:** Query with `--min-trust 0.6` to exclude low-trust data.
