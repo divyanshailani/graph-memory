@@ -128,7 +128,7 @@ def ingest_codebase(db_path, directory):
     
     # We create the root Project Node first
     root_id = f"Project_{directory.name}"
-    add_node(db_path, root_id, "Project", {"path": str(directory)}, trust_score=1.0)
+    add_node(db_path, root_id, "Project", {"path": str(directory)}, trust_score=1.0, verification_method="source_parse")
     
     # Track created MOCs to avoid duplicates
     created_mocs = set()
@@ -167,21 +167,21 @@ def ingest_codebase(db_path, directory):
         rel_parent = path.parent.relative_to(directory)
         moc_id = f"MOC_{rel_parent.name}" if rel_parent.name else f"MOC_{directory.name}"
         if moc_id not in created_mocs:
-            add_node(db_path, moc_id, "MOC_Hub", {"dir": str(rel_parent)}, trust_score=1.0, link_to=root_id, link_type="PART_OF")
+            add_node(db_path, moc_id, "MOC_Hub", {"dir": str(rel_parent)}, trust_score=1.0, verification_method="source_parse", link_to=root_id, link_type="PART_OF")
             created_mocs.add(moc_id)
             
         # 2. Create the File Node
         file_id = f"File_{path.name}"
-        add_node(db_path, file_id, "File", {"path": str(path.relative_to(directory))}, trust_score=1.0, link_to=moc_id, link_type="CONTAINS")
+        add_node(db_path, file_id, "File", {"path": str(path.relative_to(directory))}, trust_score=1.0, verification_method="source_parse", link_to=moc_id, link_type="CONTAINS")
         
         # 3. Create the Component Nodes (Classes and Functions)
         for cls in set(entities["classes"]):
             comp_id = f"Class_{cls}_{path.name}"
-            add_node(db_path, comp_id, "Component", {"name": cls, "type": "class"}, trust_score=1.0, link_to=file_id, link_type="DEFINED_IN")
+            add_node(db_path, comp_id, "Component", {"name": cls, "type": "class"}, trust_score=1.0, verification_method="source_parse", link_to=file_id, link_type="DEFINED_IN")
             
         for func in set(entities["functions"]):
             comp_id = f"Func_{func}_{path.name}"
-            add_node(db_path, comp_id, "Component", {"name": func, "type": "function"}, trust_score=1.0, link_to=file_id, link_type="DEFINED_IN")
+            add_node(db_path, comp_id, "Component", {"name": func, "type": "function"}, trust_score=1.0, verification_method="source_parse", link_to=file_id, link_type="DEFINED_IN")
             
         # 4. Create the Directional Edges (The Dependency Arrow)
         pre_sweep_file_imports(db_path, file_id)
@@ -189,8 +189,8 @@ def ingest_codebase(db_path, directory):
             clean_imp = imp.replace('"', '').replace("'", "").strip(';')
             target_id = f"Dependency_{clean_imp}"
             # Ensure the target node exists as an abstract dependency
-            add_node(db_path, target_id, "External_Dependency", {"module": clean_imp}, trust_score=0.8, link_to=root_id, link_type="USES")
+            add_node(db_path, target_id, "External_Dependency", {"module": clean_imp}, trust_score=0.8, verification_method="source_parse", link_to=root_id, link_type="USES")
             # Create the arrow FROM the importing file TO the imported file/module
-            add_relation(db_path, file_id, target_id, "IMPORTS", trust_score=1.0)
+            add_relation(db_path, file_id, target_id, "IMPORTS", trust_score=1.0, verification_method="source_parse")
             
     print("[*] AST Ingestion Complete!")

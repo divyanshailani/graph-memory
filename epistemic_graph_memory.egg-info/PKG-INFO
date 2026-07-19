@@ -6,7 +6,7 @@ Author: Divyansh Ailani
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
-Requires-Python: >=3.9
+Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: mcp>=1.1.2
 Requires-Dist: tree-sitter>=0.22.0

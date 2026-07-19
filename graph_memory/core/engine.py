@@ -334,23 +334,27 @@ def read_graph(db_path: str) -> dict:
     init_db(db_path)
     with get_connection(db_path) as conn:
         nodes = []
-        for row in conn.execute("SELECT id, label, properties, trust_score FROM Nodes WHERE is_deleted = 0").fetchall():
+        for row in conn.execute("SELECT id, label, properties, trust_score, created_at, last_verified_at FROM Nodes WHERE is_deleted = 0").fetchall():
             nodes.append({
                 "id": row[0],
                 "label": row[1],
                 "properties": json.loads(row[2]) if row[2] else {},
-                "trust_score": row[3]
+                "trust_score": row[3],
+                "created_at": row[4],
+                "last_verified_at": row[5]
             })
             
         edges = []
-        for row in conn.execute("SELECT e.source_id, e.target_id, e.relation_type, e.properties, e.trust_score, e.verification_method FROM Edges e JOIN Nodes s ON s.id = e.source_id JOIN Nodes t ON t.id = e.target_id WHERE s.is_deleted = 0 AND t.is_deleted = 0").fetchall():
+        for row in conn.execute("SELECT e.source_id, e.target_id, e.relation_type, e.properties, e.trust_score, e.verification_method, e.created_at, e.last_verified_at FROM Edges e JOIN Nodes s ON s.id = e.source_id JOIN Nodes t ON t.id = e.target_id WHERE s.is_deleted = 0 AND t.is_deleted = 0").fetchall():
             edges.append({
                 "source_id": row[0],
                 "target_id": row[1],
                 "relation_type": row[2],
                 "properties": json.loads(row[3]) if row[3] else {},
                 "trust_score": row[4],
-                "verification_method": row[5]
+                "verification_method": row[5],
+                "created_at": row[6],
+                "last_verified_at": row[7]
             })
             
         return {"nodes": nodes, "edges": edges}
@@ -367,7 +371,7 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
     init_db(db_path)
     with get_connection(db_path) as conn:
         node = conn.execute("""
-            SELECT label, properties, status, updated_at 
+            SELECT label, properties, status, updated_at, created_at, last_verified_at 
             FROM Nodes 
             WHERE id = ? AND is_deleted = 0 AND trust_score >= ?
         """, (central_node_id, min_trust)).fetchone()
@@ -375,18 +379,18 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
         if not node:
             return f"Node '{central_node_id}' not found, deleted, or below trust threshold."
             
-        label, props_json, status, updated_at = node
+        label, props_json, status, updated_at, created_at, last_verified_at = node
         props = json.loads(props_json) if props_json else {}
         
         output = [
             f"Entity: {central_node_id} ({label})",
-            f"Status: {status} | Last Updated: {updated_at}",
+            f"Status: {status} | Created: {created_at} | Last Verified: {last_verified_at} | Last Updated: {updated_at}",
             f"Metadata: {json.dumps(props, indent=2)}",
             "Relationships:"
         ]
         
         edges = conn.execute("""
-            SELECT relation_type, target_id, properties 
+            SELECT relation_type, target_id, properties, created_at, last_verified_at 
             FROM Edges 
             WHERE source_id = ? AND trust_score >= ?
         """, (central_node_id, min_trust)).fetchall()
@@ -394,19 +398,19 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
         if not edges:
             output.append("  (None)")
         else:
-            for rel_type, target, e_props in edges:
-                output.append(f"  -[{rel_type}]-> {target} (Context: {e_props})")
+            for rel_type, target, e_props, c_at, v_at in edges:
+                output.append(f"  -[{rel_type}]-> {target} (Context: {e_props}, Created: {c_at}, Verified: {v_at})")
                 
         # Also show incoming edges
         incoming_edges = conn.execute("""
-            SELECT source_id, relation_type, properties 
+            SELECT source_id, relation_type, properties, created_at, last_verified_at 
             FROM Edges 
             WHERE target_id = ? AND trust_score >= ?
         """, (central_node_id, min_trust)).fetchall()
         
         if incoming_edges:
             output.append("Incoming Relationships:")
-            for source, rel_type, e_props in incoming_edges:
-                output.append(f"  {source} -[{rel_type}]-> (this) (Context: {e_props})")
+            for source, rel_type, e_props, c_at, v_at in incoming_edges:
+                output.append(f"  {source} -[{rel_type}]-> (this) (Context: {e_props}, Created: {c_at}, Verified: {v_at})")
                 
         return "\n".join(output)
