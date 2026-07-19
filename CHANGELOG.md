@@ -2,6 +2,13 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v1.6.8] - Advanced Protocol Schema & Local LLMs
+- **Strict Node Ontology (`Fact_Node`)**: Hardcoded the AST ingestion engine (`ingest.py`) to exclusively emit deterministic `Fact_Node` entities. Legacy granular types (`Component`, `File`) have been moved into the strict JSON schema payload.
+- **Advanced Agent Protocols**: Introduced `[attributes_json]` schema enforcement for Multi-Agent Provenance (`created_by`, `source`) and Expanded Trust (`confidence`, `verification_source`).
+- **Execution Workflows**: Added native support for `Episode_Node` tracking to allow agents to log successful macro-workflows via `FOLLOWED_BY` edges.
+- **Local LLM Integration**: Fully documented MCP compatibility and schema enforcement for local agents (Ollama, LM Studio, OpenHands).
+- **Documentation Refactor**: Deleted `THESIS.md` and stripped AI-hype jargon from `README.md` and `SKILL.md` in favor of a clean, technical Open Knowledge Format (OKF) lineage.
+
 ## [v1.2.0] - PyPI Global Package & Core Upgrade
 - **PyPI Distribution**: Graph-Memory is now an installable global Python package via `pip install graph-memory`. No more cloning!
 - **Drop-In MCP Replacement**: Completely rewrote the `mcp/server.py` to expose exactly the 9 standard Anthropic API tool signatures (`create_entities`, `search_nodes`, etc.). Agents no longer need prompt modifications to use Graph-Memory!
