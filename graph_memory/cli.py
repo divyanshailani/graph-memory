@@ -72,6 +72,13 @@ def main():
     export_3d_parser = subparsers.add_parser("export-3d", help="Export the graph into a GPU-accelerated WebGL 3D Viewer")
     export_3d_parser.add_argument("output_file", type=str, help="Output HTML file path")
 
+    # Lint
+    lint_parser = subparsers.add_parser("lint", help="Lint graph for orphans and dangling edges")
+    lint_parser.add_argument("--fix", action="store_true", help="Automatically prune dangling edges and soft-delete orphans")
+
+    # Consolidate
+    consolidate_parser = subparsers.add_parser("consolidate", help="Perform database housekeeping and reclaim disk space")
+
     args = parser.parse_args()
     
     db_path = args.db or engine.get_db_path()
@@ -145,6 +152,14 @@ def main():
         elif args.command == "summarize-mocs":
             from graph_memory.core.summarizer import generate_moc_summaries
             generate_moc_summaries(db_path)
+
+        elif args.command == "lint":
+            results = engine.lint_graph(db_path, fix=args.fix)
+            print(json.dumps(results, indent=2))
+
+        elif args.command == "consolidate":
+            stats = engine.consolidate_graph(db_path)
+            print(json.dumps(stats, indent=2))
 
         elif args.command == "export-3d":
             with engine.get_connection(db_path) as conn:

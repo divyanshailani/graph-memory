@@ -2,6 +2,12 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v1.7.0] - Dynamic Seed Memory, Graph Hygiene Linting & Consolidation
+- **Dynamic Seed Memory Ingestion**: Injected lightweight active node/hub context into MCP tool signatures (`search_nodes`, `read_graph`) to eliminate AI "Cold Start" amnesia.
+- **Graph Hygiene (`graph-memory lint [--fix]`)**: Added a deterministic CLI command to detect orphan nodes and dangling edges, with an automated `--fix` flag for repair.
+- **Database Consolidation (`graph-memory consolidate`)**: Added on-demand database maintenance ("Dreaming") to clean dangling relations and execute `PRAGMA incremental_vacuum`.
+- **Enrich-Before-Create (Duplicate Guard)**: Enhanced engine property update logic to prevent entity duplication during node assertion.
+
 ## [v1.6.8] - Advanced Protocol Schema & Local LLMs
 - **Strict Node Ontology (`Fact_Node`)**: Hardcoded the AST ingestion engine (`ingest.py`) to exclusively emit deterministic `Fact_Node` entities. Legacy granular types (`Component`, `File`) have been moved into the strict JSON schema payload.
 - **Advanced Agent Protocols**: Introduced `[attributes_json]` schema enforcement for Multi-Agent Provenance (`created_by`, `source`) and Expanded Trust (`confidence`, `verification_source`).

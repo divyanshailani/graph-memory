@@ -39,7 +39,16 @@ Generates structural AST nodes for the current directory.
 `graph-memory summarize-mocs`
 Uses LLM to summarize ingested structural hubs.
 
-### 4. Visualization
+### 4. Hygiene & Maintenance
+**Graph Health Linting:**
+`graph-memory lint [--fix]`
+Checks for orphan nodes and dangling edges, optionally repairing them.
+
+**Database Consolidation ("Dreaming"):**
+`graph-memory consolidate`
+Cleans dangling relations and reclaims SQLite disk space via incremental vacuum.
+
+### 5. Visualization
 **HTML Export:**
 `graph-memory export_html .agents/graph_memory_vis.html`
 

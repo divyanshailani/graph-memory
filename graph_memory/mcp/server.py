@@ -23,6 +23,7 @@ async def handle_list_tools() -> list[types.Tool]:
     Exposes the 9 standard Anthropic MCP Memory Tool signatures.
     This makes the package a "Drop-In Replacement" for the official memory server.
     """
+    seed_context = engine.get_seed_memory(DB_PATH)
     return [
         types.Tool(
             name="create_entities",
@@ -36,7 +37,6 @@ async def handle_list_tools() -> list[types.Tool]:
                         "items": {
                             "type": "object",
                             "properties": {
-                    "db_path": {"type": "string", "description": "Optional path to a specific graph_memory.sqlite database for cross-project queries."},
                                 "name": {"type": "string", "description": "The name/ID of the entity"},
                                 "entityType": {"type": "string", "description": "The type or label of the entity"},
                                 "observations": {
@@ -64,7 +64,6 @@ async def handle_list_tools() -> list[types.Tool]:
                         "items": {
                             "type": "object",
                             "properties": {
-                    "db_path": {"type": "string", "description": "Optional path to a specific graph_memory.sqlite database for cross-project queries."},
                                 "from": {"type": "string", "description": "The name of the source entity"},
                                 "to": {"type": "string", "description": "The name of the target entity"},
                                 "relationType": {"type": "string", "description": "The type of relation"}
@@ -88,7 +87,6 @@ async def handle_list_tools() -> list[types.Tool]:
                         "items": {
                             "type": "object",
                             "properties": {
-                    "db_path": {"type": "string", "description": "Optional path to a specific graph_memory.sqlite database for cross-project queries."},
                                 "entityName": {"type": "string", "description": "The name of the entity"},
                                 "contents": {
                                     "type": "array",
@@ -131,7 +129,6 @@ async def handle_list_tools() -> list[types.Tool]:
                         "items": {
                             "type": "object",
                             "properties": {
-                    "db_path": {"type": "string", "description": "Optional path to a specific graph_memory.sqlite database for cross-project queries."},
                                 "entityName": {"type": "string", "description": "The name of the entity"},
                                 "observations": {
                                     "type": "array",
@@ -158,7 +155,6 @@ async def handle_list_tools() -> list[types.Tool]:
                         "items": {
                             "type": "object",
                             "properties": {
-                    "db_path": {"type": "string", "description": "Optional path to a specific graph_memory.sqlite database for cross-project queries."},
                                 "from": {"type": "string", "description": "The name of the source entity"},
                                 "to": {"type": "string", "description": "The name of the target entity"},
                                 "relationType": {"type": "string", "description": "The type of relation"}
@@ -172,7 +168,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="read_graph",
-            description="Read the entire knowledge graph.",
+            description=f"Read the entire knowledge graph. [{seed_context}]",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -182,7 +178,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="search_nodes",
-            description="Search for nodes in the knowledge graph based on a query.",
+            description=f"Search for nodes in the knowledge graph based on a query. [{seed_context}]",
             inputSchema={
                 "type": "object",
                 "properties": {

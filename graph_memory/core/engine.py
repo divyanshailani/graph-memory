@@ -414,3 +414,103 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
                 output.append(f"  {source} -[{rel_type}]-> (this) (Context: {e_props}, Created: {c_at}, Verified: {v_at})")
                 
         return "\n".join(output)
+
+# ---------------------------------------------------------------------------
+# Seed Memory, Graph Hygiene & Maintenance (Understory Upgrades)
+# ---------------------------------------------------------------------------
+
+def get_seed_memory(db_path: str, max_items: int = 10) -> str:
+    """
+    Solves AI cold-start amnesia by summarizing top-level memory hubs and active entities.
+    Returns a compact summary string intended for MCP tool descriptions / initialization.
+    """
+    if not os.path.exists(db_path):
+        return "Knowledge graph is currently empty."
+        
+    with get_connection(db_path) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM Nodes WHERE is_deleted = 0 AND status = 'active'").fetchone()[0]
+        if count == 0:
+            return "Knowledge graph is empty (0 active nodes)."
+            
+        rows = conn.execute("""
+            SELECT id, label, properties FROM Nodes 
+            WHERE is_deleted = 0 AND status = 'active'
+            ORDER BY access_count DESC, updated_at DESC LIMIT ?
+        """, (max_items,)).fetchall()
+        
+        items = []
+        for r_id, r_label, r_props in rows:
+            props = json.loads(r_props) if r_props else {}
+            entity_type = props.get("entity_type") or r_label
+            items.append(f"{r_id} ({entity_type})")
+            
+        return f"Active Graph Memory Context ({count} total nodes). Key Hubs: " + ", ".join(items)
+
+def lint_graph(db_path: str, fix: bool = False) -> dict:
+    """
+    Performs deterministic graph hygiene checks:
+    - Finds orphan nodes (no incoming or outgoing edges)
+    - Finds dangling edges (source or target node deleted/missing)
+    If fix=True, removes dangling edges and soft-deletes orphan nodes.
+    """
+    init_db(db_path)
+    results = {
+        "orphans": [],
+        "dangling_edges": [],
+        "fixed_orphans": 0,
+        "fixed_edges": 0
+    }
+    
+    with get_connection(db_path) as conn:
+        # 1. Detect Orphan Nodes
+        orphan_rows = conn.execute("""
+            SELECT id, label FROM Nodes 
+            WHERE is_deleted = 0 AND status = 'active'
+            AND id NOT IN (SELECT source_id FROM Edges UNION SELECT target_id FROM Edges)
+        """).fetchall()
+        results["orphans"] = [{"id": r[0], "label": r[1]} for r in orphan_rows]
+        
+        # 2. Detect Dangling Edges
+        dangling_rows = conn.execute("""
+            SELECT source_id, target_id, relation_type FROM Edges
+            WHERE source_id NOT IN (SELECT id FROM Nodes WHERE is_deleted = 0)
+               OR target_id NOT IN (SELECT id FROM Nodes WHERE is_deleted = 0)
+        """).fetchall()
+        results["dangling_edges"] = [{"source": r[0], "target": r[1], "relation": r[2]} for r in dangling_rows]
+        
+        # 3. Apply fixes if requested
+        if fix:
+            with write_transaction(conn):
+                if results["dangling_edges"]:
+                    conn.execute("""
+                        DELETE FROM Edges
+                        WHERE source_id NOT IN (SELECT id FROM Nodes WHERE is_deleted = 0)
+                           OR target_id NOT IN (SELECT id FROM Nodes WHERE is_deleted = 0)
+                    """)
+                    results["fixed_edges"] = len(results["dangling_edges"])
+                    
+                if results["orphans"]:
+                    for orphan in results["orphans"]:
+                        conn.execute("UPDATE Nodes SET is_deleted = 1, updated_at = ? WHERE id = ?", (now_iso(), orphan["id"]))
+                    results["fixed_orphans"] = len(results["orphans"])
+                    
+    return results
+
+def consolidate_graph(db_path: str) -> dict:
+    """
+    Performs database housekeeping ("Dreaming"):
+    - Cleans dangling edges
+    - Reclaims SQLite disk space via PRAGMA incremental_vacuum
+    """
+    init_db(db_path)
+    stats = {"cleaned_edges": 0, "vacuumed": True}
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            cursor = conn.execute("""
+                DELETE FROM Edges 
+                WHERE source_id NOT IN (SELECT id FROM Nodes WHERE is_deleted = 0) 
+                   OR target_id NOT IN (SELECT id FROM Nodes WHERE is_deleted = 0)
+            """)
+            stats["cleaned_edges"] = cursor.rowcount
+            conn.execute("PRAGMA incremental_vacuum;")
+    return stats
