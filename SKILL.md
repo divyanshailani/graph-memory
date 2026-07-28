@@ -40,13 +40,16 @@ Generates structural AST nodes for the current directory.
 Uses LLM to summarize ingested structural hubs.
 
 ### 4. Code-Aware AST Ingestion, Call Graphs & Two-Way Sync
-**Full Codebase Ingestion (v2.0.0):**
-`graph-memory ingest <directory> [--agent AGENT_NAME] [--rationale "REASON"]`
-Scans and indexes an entire project into Graph Memory, building MOC hubs, file nodes, class inheritance (`EXTENDS`), function call trees (`CALLS`), and external dependency graphs with agent provenance.
+### 5. Epistemic Truth Decay & Global Decision Ledger (v2.1.0)
+**Dynamic Query-Time Decay:**
+- Computes time-decayed effective trust score dynamically based on elapsed time since `last_verified_at`:
+  $$\text{Effective Trust} = \text{Base Trust Score} \times \left(0.5^{\frac{\Delta t_{\text{days}}}{30.0}}\right)$$
+- Any node re-verification (`add_observation`, `ingest_file`, `add_node`) resets `last_verified_at = now()`, restoring effective trust to 100%.
 
-**Incremental Single-File Ingest (v2.0.0):**
-`graph-memory ingest-file <file_path> [--agent AGENT_NAME] [--rationale "REASON"]`
-Incrementally re-parses a single modified file on disk in <5ms, capturing function signatures, docstrings, line bounds (`L10-L45`), code snippets, `CALLS` call graphs, `EXTENDS` class inheritance, and automatically soft-deletes obsolete ghost components via pre-sweep pruning.
+**Global Multi-Agent Decision Ledger Query:**
+`graph-memory query-history [--agent AGENT_NAME] [--node-id NODE_ID] [--days DAYS] [--limit N]`
+Queries decisions across all nodes globally in a dedicated SQLite `Decision_Ledger` table.
+*MCP Tool:* `query_decision_history(agentName, node_id, days, limit)`
 
 ### 5. Hygiene & Maintenance
 **Graph Health Linting:**

@@ -243,6 +243,20 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["file_path"]
             }
         ),
+        types.Tool(
+            name="query_decision_history",
+            description="Query the global Decision Ledger across all nodes by agent, node ID, or timeframe.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "agentName": {"type": "string", "description": "Filter by agent name (e.g. Hermes, Antigravity, Claude)."},
+                    "node_id": {"type": "string", "description": "Filter by specific node ID."},
+                    "days": {"type": "integer", "description": "Filter decisions made in the last N days."},
+                    "limit": {"type": "integer", "description": "Maximum entries to return (default 50)."}
+                }
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -360,6 +374,14 @@ async def handle_call_tool(
             rationale = arguments.get("rationale", "Incremental file AST ingest")
             from graph_memory.core.ingest import ingest_file
             res = ingest_file(actual_db_path, file_path, agent_name=agent_name, rationale=rationale)
+            return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
+
+        elif name == "query_decision_history":
+            agent_name = arguments.get("agentName")
+            node_id = arguments.get("node_id")
+            days = arguments.get("days")
+            limit = arguments.get("limit", 50)
+            res = engine.query_decision_ledger(actual_db_path, agent_name=agent_name, node_id=node_id, days=days, limit=limit)
             return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
 
         else:

@@ -2,6 +2,12 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v2.1.0] - 2026-07-28
+- **Dynamic Epistemic Truth Decay (Ebbinghaus Forgetting Curve)**: Added `calculate_effective_trust` and `get_effective_trust_for_node` to compute time-decayed trust score dynamically based on elapsed time since `last_verified_at` ($\text{effective\_trust} = \text{base\_trust} \times 0.5^{\frac{\Delta t}{30.0}}$).
+- **First-Class `Decision_Ledger` Table**: Created dedicated, indexed `Decision_Ledger` table in SQLite schema to log agent, node_id, action, rationale, and ISO timestamp.
+- **`query_decision_history` MCP Tool & CLI Subcommand**: Added `query_decision_history` MCP tool and `graph-memory query-history` CLI subcommand to query decisions globally across the entire project by agent, node ID, or timeframe.
+- **Effective Trust Formatting in Subgraphs**: Updated `serialize_subgraph` to display effective trust and decay rate alongside decision history.
+
 ## [v2.0.1] - Cybersecurity QA Hardening & Edge-Case Protection
 - **Memory Explosion Protection**: Added 10MB file size cap (`MAX_FILE_SIZE = 10MB`) to prevent AST parsing memory exhaustion or ReDoS attacks.
 - **Null Byte Binary File Protection**: Added `b'\x00'` sample checks to safely ignore binary executable files.

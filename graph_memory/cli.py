@@ -85,6 +85,13 @@ def main():
     ingest_file_parser.add_argument("--agent", type=str, default="CLI-Agent", help="Agent name")
     ingest_file_parser.add_argument("--rationale", type=str, default="CLI file update", help="Reason for file modification")
 
+    # Query Decision History
+    query_history_parser = subparsers.add_parser("query-history", help="Query global Decision Ledger across all nodes")
+    query_history_parser.add_argument("--agent", type=str, help="Filter by agent name")
+    query_history_parser.add_argument("--node-id", type=str, help="Filter by node ID")
+    query_history_parser.add_argument("--days", type=int, help="Filter entries from last N days")
+    query_history_parser.add_argument("--limit", type=int, default=50, help="Max entries to return")
+
     args = parser.parse_args()
     
     db_path = args.db or engine.get_db_path()
@@ -170,6 +177,10 @@ def main():
         elif args.command == "ingest-file":
             from graph_memory.core.ingest import ingest_file
             res = ingest_file(db_path, args.file_path, agent_name=args.agent, rationale=args.rationale)
+            print(json.dumps(res, indent=2))
+
+        elif args.command == "query-history":
+            res = engine.query_decision_ledger(db_path, agent_name=args.agent, node_id=args.node_id, days=args.days, limit=args.limit)
             print(json.dumps(res, indent=2))
 
         elif args.command == "merge":

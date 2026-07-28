@@ -108,6 +108,21 @@ def init_db(db_path: str):
                 )
             """)
             
+            # Decision_Ledger Table (First-Class Multi-Agent Audit Trail)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS Decision_Ledger (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_id TEXT NOT NULL,
+                    agent_name TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    rationale TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    FOREIGN KEY(node_id) REFERENCES Nodes(id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_agent ON Decision_Ledger(agent_name);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_node ON Decision_Ledger(node_id);")
+
             # Migration for existing databases
             try:
                 conn.execute("ALTER TABLE Nodes ADD COLUMN trust_score FLOAT DEFAULT 1.0")
@@ -160,6 +175,74 @@ def init_db(db_path: str):
                 CREATE INDEX IF NOT EXISTS idx_nodes_type
                 ON Nodes(json_extract(properties, '$.type'))
             """)
+
+def calculate_effective_trust(base_trust: float, last_verified_at: str, half_life_days: float = 30.0) -> float:
+    """
+    Calculates time-decayed effective trust score based on Ebbinghaus forgetting curve half-life.
+    Formula: base_trust * (0.5 ** (elapsed_days / half_life_days))
+    """
+    if not last_verified_at:
+        return base_trust
+    try:
+        verified_dt = datetime.fromisoformat(last_verified_at)
+        now = datetime.now(timezone.utc)
+        if verified_dt.tzinfo is None:
+            verified_dt = verified_dt.replace(tzinfo=timezone.utc)
+        elapsed_days = (now - verified_dt).total_seconds() / 86400.0
+        if elapsed_days <= 0:
+            return base_trust
+        decay_factor = 0.5 ** (elapsed_days / half_life_days)
+        return round(base_trust * decay_factor, 4)
+    except Exception:
+        return base_trust
+
+def get_effective_trust_for_node(db_path: str, node_id: str, half_life_days: float = 30.0) -> float:
+    """Returns effective trust score for a node."""
+    with get_connection(db_path) as conn:
+        row = conn.execute("SELECT trust_score, last_verified_at FROM Nodes WHERE id = ?", (node_id,)).fetchone()
+        if not row:
+            return 1.0
+        return calculate_effective_trust(row[0] or 1.0, row[1], half_life_days)
+
+def record_decision_ledger(db_path: str, node_id: str, agent_name: str, action: str, rationale: str):
+    """Records an entry in the first-class Decision_Ledger table."""
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            conn.execute("""
+                INSERT INTO Decision_Ledger (node_id, agent_name, action, rationale, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+            """, (node_id, agent_name or "System", action, rationale or "N/A", now_iso()))
+
+def query_decision_ledger(db_path: str, agent_name: str = None, node_id: str = None, days: int = None, limit: int = 50) -> list:
+    """Queries historical decision entries across nodes by agent, node_id, or timeframe."""
+    with get_connection(db_path) as conn:
+        query = "SELECT id, node_id, agent_name, action, rationale, timestamp FROM Decision_Ledger WHERE 1=1"
+        params = []
+        if agent_name:
+            query += " AND agent_name = ?"
+            params.append(agent_name)
+        if node_id:
+            query += " AND node_id = ?"
+            params.append(node_id)
+        if days:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            query += " AND timestamp >= ?"
+            params.append(cutoff)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        
+        rows = conn.execute(query, params).fetchall()
+        return [
+            {
+                "id": r[0],
+                "node_id": r[1],
+                "agent_name": r[2],
+                "action": r[3],
+                "rationale": r[4],
+                "timestamp": r[5]
+            }
+            for r in rows
+        ]
 
 # ---------------------------------------------------------------------------
 # Core Operations
@@ -279,6 +362,11 @@ def get_or_create_node(
                         trust_score = MAX(trust_score, excluded.trust_score)
                 """, (node_id, link_to, link_type, now_iso(), now_iso(), trust_score, verification_method))
             
+            conn.execute("""
+                INSERT INTO Decision_Ledger (node_id, agent_name, action, rationale, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+            """, (node_id, agent_name or "System", "upsert_node", rationale or "Node created or updated", now_iso()))
+            
             return node_id
 
 def sweep_orphans(db_path: str, root_id: str = None) -> int:
@@ -300,13 +388,26 @@ def sweep_orphans(db_path: str, root_id: str = None) -> int:
             """, (now_iso(), root_id))
             return cursor.rowcount
 
-def create_relation(db_path: str, source_id: str, target_id: str, relation_type: str, properties: dict = None, trust_score: float = 1.0, verification_method: str = "unknown"):
+def create_relation(
+    db_path: str, 
+    source_id: str, 
+    target_id: str, 
+    relation_type: str, 
+    props: dict = None,
+    trust_score: float = 1.0,
+    verification_method: str = "unknown"
+):
     """
-    Draw an edge. Composite UNIQUE constraint prevents identical duplicates.
+    Creates a directional edge between source_id and target_id with ON CONFLICT UPDATE semantics.
+    Resolves canonical pointers automatically.
     """
     init_db(db_path)
-    props = properties or {}
+    source_id = resolve_canonical_id(db_path, source_id)
+    target_id = resolve_canonical_id(db_path, target_id)
     
+    if props is None:
+        props = {}
+        
     with get_connection(db_path) as conn:
         with write_transaction(conn):
             conn.execute("""
@@ -327,7 +428,7 @@ def add_observation(
     rationale: str = None
 ):
     """
-    Appends an observation and logs decision rationale in history.
+    Appends an observation and logs decision rationale in history and Decision_Ledger.
     """
     init_db(db_path)
     node_id = resolve_canonical_id(db_path, node_id)
@@ -360,6 +461,11 @@ def add_observation(
                 SET properties = ?, updated_at = ?, last_verified_at = ?
                 WHERE id = ?
             """, (json.dumps(props), now_iso(), now_iso(), node_id))
+            
+            conn.execute("""
+                INSERT INTO Decision_Ledger (node_id, agent_name, action, rationale, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+            """, (node_id, agent_name or "System", "add_observation", rationale or f"Observation: {observation[:100]}", now_iso()))
 
 def soft_delete_entity(db_path: str, node_id: str):
     """
@@ -418,10 +524,11 @@ def read_graph(db_path: str) -> dict:
 # Serialization
 # ---------------------------------------------------------------------------
 
-def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.6) -> str:
+def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.0, half_life_days: float = 30.0) -> str:
     """
     Converts a node's immediate neighborhood into an LLM-readable format.
     Maximizes attention while minimizing token bloat. Automatically follows alias redirects.
+    Computes time-decayed effective trust score dynamically based on last_verified_at.
     """
     init_db(db_path)
     canon_id = resolve_canonical_id(db_path, central_node_id)
@@ -431,7 +538,7 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
 
     with get_connection(db_path) as conn:
         node = conn.execute("""
-            SELECT label, properties, status, updated_at, created_at, last_verified_at 
+            SELECT label, properties, status, updated_at, created_at, last_verified_at, trust_score 
             FROM Nodes 
             WHERE id = ? AND is_deleted = 0 AND trust_score >= ?
         """, (central_node_id, min_trust)).fetchone()
@@ -439,7 +546,7 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
         if not node:
             return f"Node '{original_requested_id}' not found, deleted, or below trust threshold."
             
-        label, props_json, status, updated_at, created_at, last_verified_at = node
+        label, props_json, status, updated_at, created_at, last_verified_at, base_trust = node
         props = json.loads(props_json) if props_json else {}
         
         output = []
@@ -457,9 +564,14 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
         snippet = props.get("snippet")
         history = props.get("history", [])
 
+        base_t = base_trust if base_trust is not None else 1.0
+        eff_t = calculate_effective_trust(base_t, last_verified_at, half_life_days)
+        pct_decay = round((1.0 - (eff_t / base_t)) * 100) if base_t > 0 else 0
+
         output.extend([
             f"Entity: {central_node_id} ({label})",
             f"Author Agent: {author} | Last Modified By: {last_mod}",
+            f"Effective Trust: {eff_t:.2f} (Base: {base_t:.2f}, {pct_decay}% decay over {half_life_days}d half-life)",
             f"Status: {status} | Created: {created_at} | Last Verified: {last_verified_at} | Last Updated: {updated_at}",
         ])
 
