@@ -366,6 +366,12 @@ def get_or_create_node(
                 
             if link_to:
                 conn.execute("""
+                    INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
+                    VALUES (?, 'Fact_Node', '{}', ?, ?, ?, 1.0, 'auto')
+                    ON CONFLICT(id) DO NOTHING
+                """, (link_to, now_iso(), now_iso(), now_iso()))
+                
+                conn.execute("""
                     INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
                     VALUES (?, ?, ?, '{}', ?, ?, ?, ?)
                     ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
@@ -422,6 +428,17 @@ def create_relation(
         
     with get_connection(db_path) as conn:
         with write_transaction(conn):
+            conn.execute("""
+                INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
+                VALUES (?, 'Fact_Node', '{}', ?, ?, ?, 1.0, 'auto')
+                ON CONFLICT(id) DO NOTHING
+            """, (source_id, now_iso(), now_iso(), now_iso()))
+            conn.execute("""
+                INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
+                VALUES (?, 'Fact_Node', '{}', ?, ?, ?, 1.0, 'auto')
+                ON CONFLICT(id) DO NOTHING
+            """, (target_id, now_iso(), now_iso(), now_iso()))
+
             conn.execute("""
                 INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -760,8 +777,9 @@ def resolve_canonical_id(db_path: str, node_id: str, max_depth: int = 10) -> str
     Recursively follows 'merged_into' pointers with a visited set and depth cap
     to resolve to the active canonical node ID.
     """
-    if not os.path.exists(db_path):
+    if not db_path:
         return node_id
+    init_db(db_path)
         
     visited = set()
     curr_id = node_id
