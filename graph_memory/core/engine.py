@@ -209,6 +209,9 @@ def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict 
     Optionally links the node to another node atomically.
     """
     init_db(db_path)
+    node_id = resolve_canonical_id(db_path, node_id)
+    if link_to:
+        link_to = resolve_canonical_id(db_path, link_to)
     props = properties or {}
     
     with get_connection(db_path) as conn:
@@ -366,9 +369,14 @@ def read_graph(db_path: str) -> dict:
 def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.6) -> str:
     """
     Converts a node's immediate neighborhood into an LLM-readable format.
-    Maximizes attention while minimizing token bloat.
+    Maximizes attention while minimizing token bloat. Automatically follows alias redirects.
     """
     init_db(db_path)
+    canon_id = resolve_canonical_id(db_path, central_node_id)
+    is_redirected = (canon_id != central_node_id)
+    original_requested_id = central_node_id
+    central_node_id = canon_id
+
     with get_connection(db_path) as conn:
         node = conn.execute("""
             SELECT label, properties, status, updated_at, created_at, last_verified_at 
@@ -377,17 +385,21 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
         """, (central_node_id, min_trust)).fetchone()
         
         if not node:
-            return f"Node '{central_node_id}' not found, deleted, or below trust threshold."
+            return f"Node '{original_requested_id}' not found, deleted, or below trust threshold."
             
         label, props_json, status, updated_at, created_at, last_verified_at = node
         props = json.loads(props_json) if props_json else {}
         
-        output = [
+        output = []
+        if is_redirected:
+            output.append(f"[Alias Redirect: '{original_requested_id}' was merged into canonical entity '{central_node_id}']")
+
+        output.extend([
             f"Entity: {central_node_id} ({label})",
             f"Status: {status} | Created: {created_at} | Last Verified: {last_verified_at} | Last Updated: {updated_at}",
             f"Metadata: {json.dumps(props, indent=2)}",
             "Relationships:"
-        ]
+        ])
         
         edges = conn.execute("""
             SELECT relation_type, target_id, properties, created_at, last_verified_at 
@@ -514,3 +526,135 @@ def consolidate_graph(db_path: str) -> dict:
             stats["cleaned_edges"] = cursor.rowcount
             conn.execute("PRAGMA incremental_vacuum;")
     return stats
+
+def resolve_canonical_id(db_path: str, node_id: str, max_depth: int = 10) -> str:
+    """
+    Recursively follows 'merged_into' pointers with a visited set and depth cap
+    to resolve to the active canonical node ID.
+    """
+    if not os.path.exists(db_path):
+        return node_id
+        
+    visited = set()
+    curr_id = node_id
+    
+    with get_connection(db_path) as conn:
+        while curr_id and curr_id not in visited and len(visited) < max_depth:
+            visited.add(curr_id)
+            row = conn.execute("SELECT is_deleted, status, properties FROM Nodes WHERE id = ?", (curr_id,)).fetchone()
+            if not row:
+                break
+            is_deleted, status, props_json = row
+            if is_deleted == 1 and status == 'merged':
+                props = json.loads(props_json) if props_json else {}
+                target = props.get("merged_into")
+                if target:
+                    curr_id = target
+                else:
+                    break
+            else:
+                break
+                
+    return curr_id
+
+def merge_nodes(db_path: str, source_id: str, target_id: str) -> dict:
+    """
+    Safely merges source_id into target_id:
+    1. Resolves canonical targets.
+    2. Combines observations & metadata, recording source_id in target_id's 'aliases' list.
+    3. Prevents self-loops by removing direct edges between source_id and target_id.
+    4. Rewires all incoming/outgoing edges using ON CONFLICT to prevent UNIQUE constraint crashes.
+    5. Soft-deletes source_id with is_deleted=1, status='merged', merged_into=target_id.
+    6. Reclaims SQLite disk space via PRAGMA incremental_vacuum.
+    """
+    init_db(db_path)
+    
+    if source_id == target_id:
+        return {"status": "error", "message": "Cannot merge a node into itself."}
+        
+    canon_source = resolve_canonical_id(db_path, source_id)
+    canon_target = resolve_canonical_id(db_path, target_id)
+    
+    if canon_source == canon_target:
+        return {"status": "error", "message": "Source and Target already resolve to the same canonical entity."}
+        
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            s_row = conn.execute("SELECT label, properties FROM Nodes WHERE id = ? AND is_deleted = 0", (canon_source,)).fetchone()
+            t_row = conn.execute("SELECT label, properties FROM Nodes WHERE id = ? AND is_deleted = 0", (canon_target,)).fetchone()
+            
+            if not s_row:
+                return {"status": "error", "message": f"Source node '{canon_source}' not found or deleted."}
+            if not t_row:
+                return {"status": "error", "message": f"Target node '{canon_target}' not found or deleted."}
+                
+            s_props = json.loads(s_row[1]) if s_row[1] else {}
+            t_props = json.loads(t_row[1]) if t_row[1] else {}
+            
+            # Combine observations
+            s_obs = s_props.get("observations", [])
+            t_obs = t_props.get("observations", [])
+            combined_obs = list(dict.fromkeys(t_obs + s_obs)) # Deduplicate preserving order
+            
+            # Combine aliases
+            aliases = t_props.get("aliases", [])
+            if canon_source not in aliases:
+                aliases.append(canon_source)
+            s_aliases = s_props.get("aliases", [])
+            for sa in s_aliases:
+                if sa not in aliases:
+                    aliases.append(sa)
+                    
+            t_props.update(s_props)
+            t_props["observations"] = combined_obs
+            t_props["aliases"] = aliases
+            
+            # Update target node properties
+            conn.execute("""
+                UPDATE Nodes 
+                SET properties = ?, updated_at = ?, last_verified_at = ?, access_count = access_count + 1
+                WHERE id = ?
+            """, (json.dumps(t_props), now_iso(), now_iso(), canon_target))
+            
+            # 1. Remove direct edges between source and target (prevents self-loops)
+            conn.execute("DELETE FROM Edges WHERE (source_id = ? AND target_id = ?) OR (source_id = ? AND target_id = ?)", 
+                         (canon_source, canon_target, canon_target, canon_source))
+                         
+            # 2. Rewire Outgoing Edges: source_id -> X => target_id -> X
+            outgoing_edges = conn.execute("SELECT target_id, relation_type, properties, trust_score, verification_method FROM Edges WHERE source_id = ?", (canon_source,)).fetchall()
+            for tgt, rel_type, e_props, trust, v_method in outgoing_edges:
+                if tgt != canon_target:
+                    conn.execute("""
+                        INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+                            trust_score = MAX(trust_score, excluded.trust_score),
+                            last_verified_at = excluded.last_verified_at
+                    """, (canon_target, tgt, rel_type, e_props, now_iso(), now_iso(), trust, v_method))
+            conn.execute("DELETE FROM Edges WHERE source_id = ?", (canon_source,))
+            
+            # 3. Rewire Incoming Edges: X -> source_id => X -> target_id
+            incoming_edges = conn.execute("SELECT source_id, relation_type, properties, trust_score, verification_method FROM Edges WHERE target_id = ?", (canon_source,)).fetchall()
+            for src, rel_type, e_props, trust, v_method in incoming_edges:
+                if src != canon_target:
+                    conn.execute("""
+                        INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+                            trust_score = MAX(trust_score, excluded.trust_score),
+                            last_verified_at = excluded.last_verified_at
+                    """, (src, canon_target, rel_type, e_props, now_iso(), now_iso(), trust, v_method))
+            conn.execute("DELETE FROM Edges WHERE target_id = ?", (canon_source,))
+            
+            # 4. Soft-delete source_id with merged status
+            s_props["merged_into"] = canon_target
+            conn.execute("""
+                UPDATE Nodes 
+                SET is_deleted = 1, status = 'merged', properties = ?, updated_at = ?
+                WHERE id = ?
+            """, (json.dumps(s_props), now_iso(), canon_source))
+            
+            # 5. Vacuum
+            conn.execute("PRAGMA incremental_vacuum;")
+            
+    return {"status": "success", "source": canon_source, "target": canon_target}

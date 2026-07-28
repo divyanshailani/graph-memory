@@ -204,6 +204,19 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["names"]
             }
         ),
+        types.Tool(
+            name="merge_entities",
+            description="Merge a source entity into a target entity, combining observations and updating all associated relations.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to a specific graph_memory.sqlite database for cross-project queries."},
+                    "sourceName": {"type": "string", "description": "The name of the source entity to merge from (will be soft-deleted)."},
+                    "targetName": {"type": "string", "description": "The name of the target entity to merge into (will be preserved)."}
+                },
+                "required": ["sourceName", "targetName"]
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -300,6 +313,15 @@ async def handle_call_tool(
                 subgraph = engine.serialize_subgraph(actual_db_path, name)
                 outputs.append(subgraph)
             return [types.TextContent(type="text", text="\n---\n".join(outputs))]
+
+        elif name == "merge_entities":
+            source_name = arguments.get("sourceName", "")
+            target_name = arguments.get("targetName", "")
+            res = engine.merge_nodes(actual_db_path, source_name, target_name)
+            if res.get("status") == "success":
+                return [types.TextContent(type="text", text=f"Successfully merged entity '{source_name}' into '{target_name}'.")]
+            else:
+                return [types.TextContent(type="text", text=f"Error merging entities: {res.get('message')}")]
 
         else:
             raise ValueError(f"Unknown tool: {name}")

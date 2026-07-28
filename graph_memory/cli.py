@@ -79,6 +79,11 @@ def main():
     # Consolidate
     consolidate_parser = subparsers.add_parser("consolidate", help="Perform database housekeeping and reclaim disk space")
 
+    # Merge
+    merge_parser = subparsers.add_parser("merge", help="Merge a source entity into a target entity")
+    merge_parser.add_argument("source_id", type=str, help="Source node ID to merge from (will be soft-deleted)")
+    merge_parser.add_argument("target_id", type=str, help="Target node ID to merge into (will be preserved)")
+
     args = parser.parse_args()
     
     db_path = args.db or engine.get_db_path()
@@ -160,6 +165,10 @@ def main():
         elif args.command == "consolidate":
             stats = engine.consolidate_graph(db_path)
             print(json.dumps(stats, indent=2))
+
+        elif args.command == "merge":
+            res = engine.merge_nodes(db_path, args.source_id, args.target_id)
+            print(json.dumps(res, indent=2))
 
         elif args.command == "export-3d":
             with engine.get_connection(db_path) as conn:

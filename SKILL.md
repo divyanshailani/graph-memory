@@ -44,6 +44,10 @@ Uses LLM to summarize ingested structural hubs.
 `graph-memory lint [--fix]`
 Checks for orphan nodes and dangling edges, optionally repairing them.
 
+**Entity Merging:**
+`graph-memory merge <source_id> <target_id>`
+Safely merges a source node into a target node, consolidating observations/metadata, rewiring edges, and setting up automatic alias redirection.
+
 **Database Consolidation ("Dreaming"):**
 `graph-memory consolidate`
 Cleans dangling relations and reclaims SQLite disk space via incremental vacuum.

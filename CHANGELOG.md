@@ -2,6 +2,11 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v1.8.0] - Safe Entity Resolution, Node Merging & Alias Redirection
+- **Safe Node Merging (`merge_nodes` / `graph-memory merge`)**: Introduced atomic entity merging that consolidates JSON observations, metadata, and aliases, rewires all directional edges, and prevents self-loop creation or SQLite composite unique constraint collisions.
+- **Recursive Alias Pointer Redirection**: Updated `serialize_subgraph` and `get_node` to follow `merged_into` pointers with a `visited` set and depth cap, seamlessly resolving queries on merged node IDs to their canonical targets with an `[Alias Redirect]` tag.
+- **MCP `merge_entities` Tool**: Added standard Anthropic MCP tool signature `merge_entities(sourceName, targetName)` for real-time agentic deduplication.
+
 ## [v1.7.0] - Dynamic Seed Memory, Graph Hygiene Linting & Consolidation
 - **Dynamic Seed Memory Ingestion**: Injected lightweight active node/hub context into MCP tool signatures (`search_nodes`, `read_graph`) to eliminate AI "Cold Start" amnesia.
 - **Graph Hygiene (`graph-memory lint [--fix]`)**: Added a deterministic CLI command to detect orphan nodes and dangling edges, with an automated `--fix` flag for repair.
