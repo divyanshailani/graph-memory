@@ -2,6 +2,12 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v2.0.1] - Cybersecurity QA Hardening & Edge-Case Protection
+- **Memory Explosion Protection**: Added 10MB file size cap (`MAX_FILE_SIZE = 10MB`) to prevent AST parsing memory exhaustion or ReDoS attacks.
+- **Null Byte Binary File Protection**: Added `b'\x00'` sample checks to safely ignore binary executable files.
+- **Recursion Stack Overflow Cap**: Enforced `max_depth = 100` cap in recursive AST traversals (`extract_entities` and `extract_calls_and_inheritance`).
+- **Soft-Deleted Node Reactivation**: Updated `get_or_create_node` to reactivate pruned nodes (`is_deleted = 0, status = 'active'`) when re-discovered during re-parsing.
+
 ## [v2.0.0] - Production Call Graphs, Class Inheritance & Pre-Sweep Component Pruning
 - **Function Call Graph Extraction (`CALLS`)**: Enhanced AST parsing (`ingest.py`) to extract function and method call trees (`Func_A -[CALLS]-> Func_B`) across Python, TS, JS, Go, and Rust.
 - **Class Inheritance Extraction (`EXTENDS`)**: Extracted class inheritance hierarchies (`Class_Sub -[EXTENDS]-> Class_Base`) for Python superclasses and TS/JS class heritage.

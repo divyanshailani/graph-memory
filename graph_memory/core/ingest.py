@@ -126,8 +126,13 @@ def extract_docstring_from_node(node, content_bytes):
                     return text.strip('"' "' \n\t")
     return ""
 
-def extract_calls_and_inheritance(node, ext, entities, current_scope="", content_bytes=b""):
-    """Walks the AST node looking for function calls (CALLS) and class inheritance (EXTENDS)."""
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB safety cap for AST parsing
+
+def extract_calls_and_inheritance(node, ext, entities, current_scope="", content_bytes=b"", depth=0):
+    """Walks the AST node looking for function calls (CALLS) and class inheritance (EXTENDS) with depth cap."""
+    if depth > 100:
+        return
+        
     qmap = QUERY_MAP.get(ext)
     if not qmap:
         return
@@ -179,10 +184,13 @@ def extract_calls_and_inheritance(node, ext, entities, current_scope="", content
             new_scope = name_node.text.decode('utf8')
 
     for child in node.children:
-        extract_calls_and_inheritance(child, ext, entities, new_scope, content_bytes)
+        extract_calls_and_inheritance(child, ext, entities, new_scope, content_bytes, depth + 1)
 
-def extract_entities(node, ext, entities, content_bytes, parent_path=""):
+def extract_entities(node, ext, entities, content_bytes, parent_path="", depth=0):
     """Recursively walks the AST and matches against QUERY_MAP extracting signatures, docstrings, line bounds, and snippets."""
+    if depth > 100:
+        return
+        
     qmap = QUERY_MAP.get(ext)
     if not qmap:
         return
@@ -240,17 +248,21 @@ def extract_entities(node, ext, entities, content_bytes, parent_path=""):
             entities["imports"].append(text)
 
     for child in node.children:
-        extract_entities(child, ext, entities, content_bytes, parent_path)
+        extract_entities(child, ext, entities, content_bytes, parent_path, depth + 1)
 
 def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", rationale: str = "Single file incremental AST update") -> dict:
     """
     Incrementally re-parses a single changed file into the AST graph (<5ms).
     Updates component nodes, line ranges, signatures, docstrings, snippets, CALLS, and EXTENDS relations.
     Soft-deletes ghost component nodes before re-parsing.
+    Enforces 10MB size cap and null-byte binary file checks.
     """
     path = Path(file_path).resolve()
     if not path.is_file():
         return {"status": "error", "message": f"File '{file_path}' not found."}
+        
+    if path.stat().st_size > MAX_FILE_SIZE:
+        return {"status": "ignored", "message": f"File '{path.name}' ({path.stat().st_size} bytes) exceeds maximum allowed size of 10MB."}
         
     ext = path.suffix
     if ext not in PARSER_PACKAGES:
@@ -261,6 +273,8 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
         return {"status": "error", "message": f"Parser for '{ext}' unavailable."}
         
     content = path.read_bytes()
+    if b'\x00' in content[:1024]:
+        return {"status": "ignored", "message": f"Binary file with null bytes detected for '{path.name}', skipping AST parse."}
     tree = parser.parse(content)
     
     entities = {"functions": [], "classes": [], "imports": [], "calls": [], "extends": []}
@@ -376,6 +390,10 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
         if ".git" in path.parts or "node_modules" in path.parts or "__pycache__" in path.parts or "venv" in path.parts or ".venv" in path.parts:
             continue
             
+        if path.stat().st_size > MAX_FILE_SIZE:
+            print(f"[!] Skipping {path.name}: file exceeds 10MB limit.")
+            continue
+            
         ext = path.suffix
         if ext not in PARSER_PACKAGES:
             continue
@@ -389,6 +407,9 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
             
         try:
             content = path.read_bytes()
+            if b'\x00' in content[:1024]:
+                print(f"[!] Skipping {path.name}: binary file detected.")
+                continue
             tree = parser.parse(content)
         except Exception as e:
             print(f"[!] Failed to parse {path.name}: {e}")
