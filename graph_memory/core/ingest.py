@@ -2,8 +2,9 @@ import os
 import sys
 import json
 import importlib
+import hashlib
 from pathlib import Path
-from graph_memory.core.engine import get_or_create_node as add_node, create_relation as add_relation, get_connection, write_transaction
+from graph_memory.core.engine import get_or_create_node as add_node, create_relation as add_relation, get_connection, write_transaction, resolve_canonical_id, now_iso
 
 def pre_sweep_file_imports(db_path: str, file_node_id: str):
     """Deletes existing imports for a file before a fresh AST scan to prevent Ghost Edges."""
@@ -14,11 +15,25 @@ def pre_sweep_file_imports(db_path: str, file_node_id: str):
                 WHERE source_id = ? AND relation_type = 'IMPORTS'
             """, (file_node_id,))
 
+def pre_sweep_file_components(db_path: str, file_node_id: str):
+    """Soft-deletes all component nodes defined in a file before re-parsing to prune ghost nodes."""
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            conn.execute("""
+                UPDATE Nodes 
+                SET is_deleted = 1, status = 'pruned', updated_at = ?
+                WHERE id IN (
+                    SELECT source_id FROM Edges WHERE target_id = ? AND relation_type = 'DEFINED_IN'
+                )
+            """, (now_iso(), file_node_id))
+
 # Mapping extensions to the exact PyPI package required
 PARSER_PACKAGES = {
     ".py": "tree-sitter-python",
     ".ts": "tree-sitter-typescript",
+    ".tsx": "tree-sitter-typescript",
     ".js": "tree-sitter-javascript",
+    ".jsx": "tree-sitter-javascript",
     ".go": "tree-sitter-go",
     ".rs": "tree-sitter-rust",
 }
@@ -29,26 +44,43 @@ QUERY_MAP = {
         "import_nodes": {"import_statement", "import_from_statement"},
         "function_nodes": {"function_definition"},
         "class_nodes": {"class_definition"},
+        "call_nodes": {"call"},
     },
     ".ts": {
         "import_nodes": {"import_statement"},
         "function_nodes": {"function_declaration", "method_definition", "arrow_function"},
         "class_nodes": {"class_declaration"},
+        "call_nodes": {"call_expression"},
+    },
+    ".tsx": {
+        "import_nodes": {"import_statement"},
+        "function_nodes": {"function_declaration", "method_definition", "arrow_function"},
+        "class_nodes": {"class_declaration"},
+        "call_nodes": {"call_expression"},
     },
     ".js": {
         "import_nodes": {"import_statement"},
         "function_nodes": {"function_declaration", "method_definition", "arrow_function"},
         "class_nodes": {"class_declaration"},
+        "call_nodes": {"call_expression"},
+    },
+    ".jsx": {
+        "import_nodes": {"import_statement"},
+        "function_nodes": {"function_declaration", "method_definition", "arrow_function"},
+        "class_nodes": {"class_declaration"},
+        "call_nodes": {"call_expression"},
     },
     ".go": {
         "import_nodes": {"import_declaration", "import_spec"},
         "function_nodes": {"function_declaration", "method_declaration"},
         "class_nodes": {"type_declaration"},
+        "call_nodes": {"call_expression"},
     },
     ".rs": {
         "import_nodes": {"use_declaration"},
         "function_nodes": {"function_item"},
         "class_nodes": {"struct_item", "enum_item", "trait_item"},
+        "call_nodes": {"call_expression"},
     }
 }
 
@@ -59,19 +91,17 @@ def load_parser(ext):
     if not package_name:
         return None
 
-    # Replace hyphens with underscores for module import
     module_name = package_name.replace("-", "_")
     
     try:
         ts_module = importlib.import_module(module_name)
-        
-        # Handle v0.23+ breaking change for typescript and others
-        if hasattr(ts_module, "language"):
+        if ext == ".tsx" and hasattr(ts_module, "language_tsx"):
+            lang = tree_sitter.Language(ts_module.language_tsx())
+        elif hasattr(ts_module, "language"):
             lang = tree_sitter.Language(ts_module.language())
         elif hasattr(ts_module, "language_typescript") and module_name == "tree_sitter_typescript":
             lang = tree_sitter.Language(ts_module.language_typescript())
         else:
-            # Fallback if there are other language_* functions (e.g. language_javascript)
             lang_func = getattr(ts_module, f"language_{module_name.split('_')[-1]}", None)
             if lang_func:
                 lang = tree_sitter.Language(lang_func())
@@ -95,6 +125,61 @@ def extract_docstring_from_node(node, content_bytes):
                     text = content_bytes[str_child.start_byte:str_child.end_byte].decode('utf-8', errors='ignore')
                     return text.strip('"' "' \n\t")
     return ""
+
+def extract_calls_and_inheritance(node, ext, entities, current_scope="", content_bytes=b""):
+    """Walks the AST node looking for function calls (CALLS) and class inheritance (EXTENDS)."""
+    qmap = QUERY_MAP.get(ext)
+    if not qmap:
+        return
+        
+    node_type = node.type
+    
+    if node_type in qmap["class_nodes"]:
+        name_node = node.child_by_field_name("name")
+        cls_name = name_node.text.decode('utf8') if name_node else None
+        
+        super_name = None
+        super_node = node.child_by_field_name("superclasses") or node.child_by_field_name("heritage")
+        if super_node:
+            for child in super_node.children:
+                if child.type in ("identifier", "type_identifier", "argument_list", "extends_clause"):
+                    id_nodes = [c for c in child.children if c.type in ("identifier", "type_identifier")]
+                    if id_nodes:
+                        super_name = id_nodes[0].text.decode('utf8')
+                        break
+                    elif child.type in ("identifier", "type_identifier"):
+                        super_name = child.text.decode('utf8')
+                        break
+                        
+        if cls_name and super_name:
+            entities["extends"].append({"sub_class": cls_name, "super_class": super_name})
+            
+    elif node_type in qmap.get("call_nodes", set()):
+        func_node = node.child_by_field_name("function")
+        call_name = None
+        if func_node:
+            if func_node.type == "identifier":
+                call_name = func_node.text.decode('utf8')
+            elif func_node.type in ("attribute", "member_expression"):
+                attr_node = func_node.child_by_field_name("attribute") or func_node.child_by_field_name("property")
+                if attr_node:
+                    call_name = attr_node.text.decode('utf8')
+                    
+        if call_name and current_scope:
+            entities["calls"].append({"caller": current_scope, "callee": call_name})
+
+    new_scope = current_scope
+    if node_type in qmap["function_nodes"]:
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            new_scope = name_node.text.decode('utf8')
+    elif node_type in qmap["class_nodes"]:
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            new_scope = name_node.text.decode('utf8')
+
+    for child in node.children:
+        extract_calls_and_inheritance(child, ext, entities, new_scope, content_bytes)
 
 def extract_entities(node, ext, entities, content_bytes, parent_path=""):
     """Recursively walks the AST and matches against QUERY_MAP extracting signatures, docstrings, line bounds, and snippets."""
@@ -160,7 +245,8 @@ def extract_entities(node, ext, entities, content_bytes, parent_path=""):
 def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", rationale: str = "Single file incremental AST update") -> dict:
     """
     Incrementally re-parses a single changed file into the AST graph (<5ms).
-    Updates component nodes, line ranges, signatures, docstrings, and snippets.
+    Updates component nodes, line ranges, signatures, docstrings, snippets, CALLS, and EXTENDS relations.
+    Soft-deletes ghost component nodes before re-parsing.
     """
     path = Path(file_path).resolve()
     if not path.is_file():
@@ -177,14 +263,16 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
     content = path.read_bytes()
     tree = parser.parse(content)
     
-    entities = {"functions": [], "classes": [], "imports": []}
+    entities = {"functions": [], "classes": [], "imports": [], "calls": [], "extends": []}
     extract_entities(tree.root_node, ext, entities, content)
+    extract_calls_and_inheritance(tree.root_node, ext, entities, "", content)
     
-    import hashlib
+    file_id = f"File_{path.name}"
+    pre_sweep_file_components(db_path, file_id)
+    
     file_hash = hashlib.sha256(content).hexdigest()
     mtime = path.stat().st_mtime
     
-    file_id = f"File_{path.name}"
     add_node(
         db_path, 
         file_id, 
@@ -256,16 +344,28 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
             rationale=rationale
         )
         
-    return {"status": "success", "file": str(path), "functions": len(entities["functions"]), "classes": len(entities["classes"])}
+    for ext_data in entities["extends"]:
+        sub_cls = f"Class_{ext_data['sub_class']}_{path.name}"
+        super_cls = f"Class_{ext_data['super_class']}_{path.name}"
+        add_node(db_path, super_cls, "Fact_Node", {"entity_type": "Component", "name": ext_data['super_class'], "component_type": "class", "source": "AST_Inheritance"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
+        add_relation(db_path, sub_cls, super_cls, "EXTENDS", trust_score=1.0, verification_method="source_parse")
+        
+    for call_data in entities["calls"]:
+        caller_id = f"Func_{call_data['caller']}_{path.name}"
+        callee_id = f"Func_{call_data['callee']}_{path.name}"
+        add_node(db_path, callee_id, "Fact_Node", {"entity_type": "Component", "name": call_data['callee'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
+        add_relation(db_path, caller_id, callee_id, "CALLS", trust_score=1.0, verification_method="source_parse")
+        
+    return {"status": "success", "file": str(path), "functions": len(entities["functions"]), "classes": len(entities["classes"]), "calls": len(entities["calls"]), "extends": len(entities["extends"])}
 
-def ingest_codebase(db_path, directory):
-    """Scans the directory, parses files, and builds the MOC graph."""
+def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter", rationale: str = "Full project AST ingestion"):
+    """Scans the directory, parses files, and builds the MOC graph with call graphs and inheritance."""
     directory = Path(directory).resolve()
     print(f"[*] Starting AST ingestion of {directory}")
     
     parsers = {}
     root_id = f"Project_{directory.name}"
-    add_node(db_path, root_id, "Fact_Node", {"entity_type": "Project", "path": str(directory), "created_by": "Tree-sitter", "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse")
+    add_node(db_path, root_id, "Fact_Node", {"entity_type": "Project", "path": str(directory), "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
     
     created_mocs = set()
     
@@ -294,20 +394,22 @@ def ingest_codebase(db_path, directory):
             print(f"[!] Failed to parse {path.name}: {e}")
             continue
             
-        entities = {"functions": [], "classes": [], "imports": []}
+        entities = {"functions": [], "classes": [], "imports": [], "calls": [], "extends": []}
         extract_entities(tree.root_node, ext, entities, content)
+        extract_calls_and_inheritance(tree.root_node, ext, entities, "", content)
         
         rel_parent = path.parent.relative_to(directory)
         moc_id = f"MOC_{rel_parent.name}" if rel_parent.name else f"MOC_{directory.name}"
         if moc_id not in created_mocs:
-            add_node(db_path, moc_id, "Fact_Node", {"entity_type": "MOC_Hub", "dir": str(rel_parent), "created_by": "Tree-sitter", "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=root_id, link_type="PART_OF")
+            add_node(db_path, moc_id, "Fact_Node", {"entity_type": "MOC_Hub", "dir": str(rel_parent), "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=root_id, link_type="PART_OF", agent_name=agent_name, rationale=rationale)
             created_mocs.add(moc_id)
             
-        import hashlib
+        file_id = f"File_{path.name}"
+        pre_sweep_file_components(db_path, file_id)
+        
         file_hash = hashlib.sha256(content).hexdigest()
         mtime = path.stat().st_mtime
         
-        file_id = f"File_{path.name}"
         add_node(
             db_path, 
             file_id, 
@@ -317,14 +419,16 @@ def ingest_codebase(db_path, directory):
                 "path": str(path.relative_to(directory)), 
                 "file_hash": file_hash,
                 "mtime": mtime,
-                "created_by": "Tree-sitter", 
+                "created_by": agent_name, 
                 "source": "AST", 
                 "confidence": 1.0
             }, 
             trust_score=1.0, 
             verification_method="source_parse", 
             link_to=moc_id, 
-            link_type="CONTAINS"
+            link_type="CONTAINS",
+            agent_name=agent_name,
+            rationale=rationale
         )
         
         for cls_data in entities["classes"]:
@@ -344,14 +448,16 @@ def ingest_codebase(db_path, directory):
                     "end_line": cls_data["end_line"],
                     "snippet": cls_data["snippet"],
                     "file_path": str(path.relative_to(directory)),
-                    "created_by": "Tree-sitter", 
+                    "created_by": agent_name, 
                     "source": "AST", 
                     "confidence": 1.0
                 }, 
                 trust_score=1.0, 
                 verification_method="source_parse", 
                 link_to=file_id, 
-                link_type="DEFINED_IN"
+                link_type="DEFINED_IN",
+                agent_name=agent_name,
+                rationale=rationale
             )
             
         for func_data in entities["functions"]:
@@ -371,21 +477,37 @@ def ingest_codebase(db_path, directory):
                     "end_line": func_data["end_line"],
                     "snippet": func_data["snippet"],
                     "file_path": str(path.relative_to(directory)),
-                    "created_by": "Tree-sitter", 
+                    "created_by": agent_name, 
                     "source": "AST", 
                     "confidence": 1.0
                 }, 
                 trust_score=1.0, 
                 verification_method="source_parse", 
                 link_to=file_id, 
-                link_type="DEFINED_IN"
+                link_type="DEFINED_IN",
+                agent_name=agent_name,
+                rationale=rationale
             )
+            
+        for ext_data in entities["extends"]:
+            sub_cls = f"Class_{ext_data['sub_class']}_{path.name}"
+            super_cls = f"Class_{ext_data['super_class']}_{path.name}"
+            add_node(db_path, sub_cls, "Fact_Node", {"entity_type": "Component", "name": ext_data['sub_class'], "component_type": "class", "source": "AST_Inheritance"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
+            add_node(db_path, super_cls, "Fact_Node", {"entity_type": "Component", "name": ext_data['super_class'], "component_type": "class", "source": "AST_Inheritance"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
+            add_relation(db_path, sub_cls, super_cls, "EXTENDS", trust_score=1.0, verification_method="source_parse")
+            
+        for call_data in entities["calls"]:
+            caller_id = f"Func_{call_data['caller']}_{path.name}"
+            callee_id = f"Func_{call_data['callee']}_{path.name}"
+            add_node(db_path, caller_id, "Fact_Node", {"entity_type": "Component", "name": call_data['caller'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
+            add_node(db_path, callee_id, "Fact_Node", {"entity_type": "Component", "name": call_data['callee'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
+            add_relation(db_path, caller_id, callee_id, "CALLS", trust_score=1.0, verification_method="source_parse")
             
         pre_sweep_file_imports(db_path, file_id)
         for imp in set(entities["imports"]):
             clean_imp = imp.replace('"', '').replace("'", "").strip(';')
             target_id = f"Dependency_{clean_imp}"
-            add_node(db_path, target_id, "Fact_Node", {"entity_type": "External_Dependency", "module": clean_imp, "created_by": "Tree-sitter", "source": "AST", "confidence": 1.0}, trust_score=0.8, verification_method="source_parse", link_to=root_id, link_type="USES")
+            add_node(db_path, target_id, "Fact_Node", {"entity_type": "External_Dependency", "module": clean_imp, "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=0.8, verification_method="source_parse", link_to=root_id, link_type="USES", agent_name=agent_name, rationale=rationale)
             add_relation(db_path, file_id, target_id, "IMPORTS", trust_score=1.0, verification_method="source_parse")
             
     print("[*] AST Ingestion Complete!")

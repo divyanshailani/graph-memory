@@ -242,7 +242,7 @@ def get_or_create_node(
 
     with get_connection(db_path) as conn:
         with write_transaction(conn):
-            row = conn.execute("SELECT id, properties FROM Nodes WHERE id = ? AND is_deleted = 0", (node_id,)).fetchone()
+            row = conn.execute("SELECT id, properties FROM Nodes WHERE id = ?", (node_id,)).fetchone()
             
             if row:
                 existing_props = json.loads(row[1]) if row[1] else {}
@@ -259,7 +259,7 @@ def get_or_create_node(
                 
                 conn.execute("""
                     UPDATE Nodes 
-                    SET properties = ?, updated_at = ?, last_verified_at = ?, access_count = access_count + 1, trust_score = MAX(trust_score, ?), verification_method = ?
+                    SET properties = ?, is_deleted = 0, status = 'active', updated_at = ?, last_verified_at = ?, access_count = access_count + 1, trust_score = MAX(trust_score, ?), verification_method = ?
                     WHERE id = ?
                 """, (json.dumps(existing_props), now_iso(), now_iso(), trust_score, verification_method, node_id))
             else:

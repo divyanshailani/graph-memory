@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: epistemic-graph-memory
-Version: 1.9.0
+Version: 2.0.0
 Summary: A universal, long-term project memory tool utilizing a local SQLite graph structure for AI agents.
 Author: Divyansh Ailani
 Classifier: Programming Language :: Python :: 3

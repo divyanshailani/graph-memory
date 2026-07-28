@@ -2,6 +2,13 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v2.0.0] - Production Call Graphs, Class Inheritance & Pre-Sweep Component Pruning
+- **Function Call Graph Extraction (`CALLS`)**: Enhanced AST parsing (`ingest.py`) to extract function and method call trees (`Func_A -[CALLS]-> Func_B`) across Python, TS, JS, Go, and Rust.
+- **Class Inheritance Extraction (`EXTENDS`)**: Extracted class inheritance hierarchies (`Class_Sub -[EXTENDS]-> Class_Base`) for Python superclasses and TS/JS class heritage.
+- **Pre-Sweep Ghost Component Pruning (`pre_sweep_file_components`)**: Automatically soft-deletes obsolete component nodes before re-parsing modified files, completely eliminating ghost nodes from the graph.
+- **React TSX & JSX Support**: Added native AST parsing for `.tsx` and `.jsx` files.
+- **Multi-Agent Ingestion Provenance**: Enabled passing `agent_name` and `rationale` through full project and single-file ingestions.
+
 ## [v1.9.0] - Code-Aware AST Ingestion, Agent Provenance Ledger & Two-Way Sync
 - **Code-Aware AST Extraction**: Enhanced Tree-sitter ingestion (`ingest.py`) to capture function/class signatures, docstrings, 1-indexed line ranges (`L10-L45`), and code snippet previews directly into node metadata.
 - **Agent Provenance & Decision Rationale Ledger**: Added mandatory agent attribution (`author_agent`, `last_modified_by`), decision reasoning (`rationale`, `design_intent`), and append-only decision logs (`history: []`) across nodes and observations (aligning with IETF Agent Audit Trail standards).

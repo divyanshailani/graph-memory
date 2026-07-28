@@ -39,10 +39,14 @@ Generates structural AST nodes for the current directory.
 `graph-memory summarize-mocs`
 Uses LLM to summarize ingested structural hubs.
 
-### 4. Code-Aware AST Ingestion & Two-Way Sync
-**Incremental Single-File Ingest:**
+### 4. Code-Aware AST Ingestion, Call Graphs & Two-Way Sync
+**Full Codebase Ingestion (v2.0.0):**
+`graph-memory ingest <directory> [--agent AGENT_NAME] [--rationale "REASON"]`
+Scans and indexes an entire project into Graph Memory, building MOC hubs, file nodes, class inheritance (`EXTENDS`), function call trees (`CALLS`), and external dependency graphs with agent provenance.
+
+**Incremental Single-File Ingest (v2.0.0):**
 `graph-memory ingest-file <file_path> [--agent AGENT_NAME] [--rationale "REASON"]`
-Incrementally re-parses a single modified file on disk in <5ms, capturing function signatures, docstrings, line bounds (`L10-L45`), implementation snippets, and agent provenance decision history.
+Incrementally re-parses a single modified file on disk in <5ms, capturing function signatures, docstrings, line bounds (`L10-L45`), code snippets, `CALLS` call graphs, `EXTENDS` class inheritance, and automatically soft-deletes obsolete ghost components via pre-sweep pruning.
 
 ### 5. Hygiene & Maintenance
 **Graph Health Linting:**
