@@ -79,10 +79,11 @@ def main():
     # Consolidate
     consolidate_parser = subparsers.add_parser("consolidate", help="Perform database housekeeping and reclaim disk space")
 
-    # Merge
-    merge_parser = subparsers.add_parser("merge", help="Merge a source entity into a target entity")
-    merge_parser.add_argument("source_id", type=str, help="Source node ID to merge from (will be soft-deleted)")
-    merge_parser.add_argument("target_id", type=str, help="Target node ID to merge into (will be preserved)")
+    # Ingest File
+    ingest_file_parser = subparsers.add_parser("ingest-file", help="Incrementally re-parse a single changed file into the AST graph")
+    ingest_file_parser.add_argument("file_path", type=str, help="Path to modified file")
+    ingest_file_parser.add_argument("--agent", type=str, default="CLI-Agent", help="Agent name")
+    ingest_file_parser.add_argument("--rationale", type=str, default="CLI file update", help="Reason for file modification")
 
     args = parser.parse_args()
     
@@ -165,6 +166,11 @@ def main():
         elif args.command == "consolidate":
             stats = engine.consolidate_graph(db_path)
             print(json.dumps(stats, indent=2))
+
+        elif args.command == "ingest-file":
+            from graph_memory.core.ingest import ingest_file
+            res = ingest_file(db_path, args.file_path, agent_name=args.agent, rationale=args.rationale)
+            print(json.dumps(res, indent=2))
 
         elif args.command == "merge":
             res = engine.merge_nodes(db_path, args.source_id, args.target_id)

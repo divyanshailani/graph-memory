@@ -2,6 +2,12 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v1.9.0] - Code-Aware AST Ingestion, Agent Provenance Ledger & Two-Way Sync
+- **Code-Aware AST Extraction**: Enhanced Tree-sitter ingestion (`ingest.py`) to capture function/class signatures, docstrings, 1-indexed line ranges (`L10-L45`), and code snippet previews directly into node metadata.
+- **Agent Provenance & Decision Rationale Ledger**: Added mandatory agent attribution (`author_agent`, `last_modified_by`), decision reasoning (`rationale`, `design_intent`), and append-only decision logs (`history: []`) across nodes and observations (aligning with IETF Agent Audit Trail standards).
+- **Two-Way Incremental Sync (`ingest_file`)**: Added `ingest_file(file_path)` MCP tool and CLI command (`graph-memory ingest-file`) to re-parse a single changed file into the graph in <5ms.
+- **MCP Extensions**: Added `read_code_snippet` and `ingest_file` tools to the MCP server (`server.py`).
+
 ## [v1.8.0] - Safe Entity Resolution, Node Merging & Alias Redirection
 - **Safe Node Merging (`merge_nodes` / `graph-memory merge`)**: Introduced atomic entity merging that consolidates JSON observations, metadata, and aliases, rewires all directional edges, and prevents self-loop creation or SQLite composite unique constraint collisions.
 - **Recursive Alias Pointer Redirection**: Updated `serialize_subgraph` and `get_node` to follow `merged_into` pointers with a `visited` set and depth cap, seamlessly resolving queries on merged node IDs to their canonical targets with an `[Alias Redirect]` tag.

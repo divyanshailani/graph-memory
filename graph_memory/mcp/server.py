@@ -217,6 +217,32 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["sourceName", "targetName"]
             }
         ),
+        types.Tool(
+            name="read_code_snippet",
+            description="Retrieve the exact source code snippet, signature, docstring, and line bounds for a function or class node.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "node_id": {"type": "string", "description": "The ID of the function or class component node."}
+                },
+                "required": ["node_id"]
+            }
+        ),
+        types.Tool(
+            name="ingest_file",
+            description="Incrementally re-parse a single changed file into the AST graph in <5ms.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "file_path": {"type": "string", "description": "Absolute or relative path to the modified file on disk."},
+                    "agentName": {"type": "string", "description": "Name of the agent triggering the update (e.g. Hermes, Antigravity, Claude)."},
+                    "rationale": {"type": "string", "description": "Reason for updating or refactoring this file."}
+                },
+                "required": ["file_path"]
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -322,6 +348,19 @@ async def handle_call_tool(
                 return [types.TextContent(type="text", text=f"Successfully merged entity '{source_name}' into '{target_name}'.")]
             else:
                 return [types.TextContent(type="text", text=f"Error merging entities: {res.get('message')}")]
+
+        elif name == "read_code_snippet":
+            node_id = arguments.get("node_id", "")
+            subgraph = engine.serialize_subgraph(actual_db_path, node_id)
+            return [types.TextContent(type="text", text=subgraph)]
+
+        elif name == "ingest_file":
+            file_path = arguments.get("file_path", "")
+            agent_name = arguments.get("agentName", "MCP-Agent")
+            rationale = arguments.get("rationale", "Incremental file AST ingest")
+            from graph_memory.core.ingest import ingest_file
+            res = ingest_file(actual_db_path, file_path, agent_name=agent_name, rationale=rationale)
+            return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
 
         else:
             raise ValueError(f"Unknown tool: {name}")

@@ -202,11 +202,22 @@ def search_nodes(db_path: str, query: str, min_trust: float = 0.6) -> list:
                 
         return results
 
-def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict = None, trust_score: float = 1.0, verification_method: str = "unknown", link_to: str = None, link_type: str = "PART_OF") -> str:
+def get_or_create_node(
+    db_path: str, 
+    node_id: str, 
+    label: str, 
+    properties: dict = None, 
+    trust_score: float = 1.0, 
+    verification_method: str = "unknown", 
+    link_to: str = None, 
+    link_type: str = "PART_OF",
+    agent_name: str = "Tree-sitter",
+    rationale: str = None,
+    design_intent: str = None
+) -> str:
     """
     Creates a node, or returns an existing one to prevent fragmentation.
-    Implements the "Supersession" problem solution.
-    Optionally links the node to another node atomically.
+    Implements agent provenance attribution and decision history tracking.
     """
     init_db(db_path)
     node_id = resolve_canonical_id(db_path, node_id)
@@ -214,28 +225,50 @@ def get_or_create_node(db_path: str, node_id: str, label: str, properties: dict 
         link_to = resolve_canonical_id(db_path, link_to)
     props = properties or {}
     
+    if "author_agent" not in props:
+        props["author_agent"] = agent_name
+    props["last_modified_by"] = agent_name
+    if rationale:
+        props["rationale"] = rationale
+    if design_intent:
+        props["design_intent"] = design_intent
+        
+    history_entry = {
+        "timestamp": now_iso(),
+        "agent": agent_name,
+        "action": "upsert_node",
+        "rationale": rationale or "Node created or updated"
+    }
+
     with get_connection(db_path) as conn:
         with write_transaction(conn):
-            # Check for exact match first
             row = conn.execute("SELECT id, properties FROM Nodes WHERE id = ? AND is_deleted = 0", (node_id,)).fetchone()
             
             if row:
-                # Update properties (observations map into properties here)
                 existing_props = json.loads(row[1]) if row[1] else {}
+                hist = existing_props.get("history", [])
+                hist.append(history_entry)
+                
+                existing_obs = existing_props.get("observations", [])
+                new_obs = props.get("observations", [])
+                combined_obs = list(dict.fromkeys(existing_obs + new_obs))
+                
                 existing_props.update(props)
+                existing_props["observations"] = combined_obs
+                existing_props["history"] = hist
+                
                 conn.execute("""
                     UPDATE Nodes 
                     SET properties = ?, updated_at = ?, last_verified_at = ?, access_count = access_count + 1, trust_score = MAX(trust_score, ?), verification_method = ?
                     WHERE id = ?
                 """, (json.dumps(existing_props), now_iso(), now_iso(), trust_score, verification_method, node_id))
             else:
-                # Insert new node
+                props["history"] = [history_entry]
                 conn.execute("""
                     INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (node_id, label, json.dumps(props), now_iso(), now_iso(), now_iso(), trust_score, verification_method))
                 
-            # Atomic Linking
             if link_to:
                 conn.execute("""
                     INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
@@ -286,11 +319,18 @@ def create_relation(db_path: str, source_id: str, target_id: str, relation_type:
                     trust_score = MAX(trust_score, excluded.trust_score)
             """, (source_id, target_id, relation_type, json.dumps(props), now_iso(), now_iso(), trust_score, verification_method))
 
-def add_observation(db_path: str, node_id: str, observation: str):
+def add_observation(
+    db_path: str, 
+    node_id: str, 
+    observation: str,
+    agent_name: str = "AI-Agent",
+    rationale: str = None
+):
     """
-    Appends an observation directly into the 'observations' array in the properties JSON payload.
+    Appends an observation and logs decision rationale in history.
     """
     init_db(db_path)
+    node_id = resolve_canonical_id(db_path, node_id)
     
     with get_connection(db_path) as conn:
         with write_transaction(conn):
@@ -299,15 +339,27 @@ def add_observation(db_path: str, node_id: str, observation: str):
                 raise ValueError(f"Node '{node_id}' not found or is deleted.")
             
             props = json.loads(row[0]) if row[0] else {}
-            observations = props.get("observations", [])
-            observations.append(observation)
-            props["observations"] = observations
+            obs_list = props.get("observations", [])
+            if observation not in obs_list:
+                obs_list.append(observation)
+            props["observations"] = obs_list
+            props["last_modified_by"] = agent_name
+            
+            hist = props.get("history", [])
+            hist.append({
+                "timestamp": now_iso(),
+                "agent": agent_name,
+                "action": "add_observation",
+                "observation": observation,
+                "rationale": rationale or "Added observation"
+            })
+            props["history"] = hist
             
             conn.execute("""
                 UPDATE Nodes 
-                SET properties = ?, updated_at = ?
+                SET properties = ?, updated_at = ?, last_verified_at = ?
                 WHERE id = ?
-            """, (json.dumps(props), now_iso(), node_id))
+            """, (json.dumps(props), now_iso(), now_iso(), node_id))
 
 def soft_delete_entity(db_path: str, node_id: str):
     """
@@ -394,12 +446,48 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
         if is_redirected:
             output.append(f"[Alias Redirect: '{original_requested_id}' was merged into canonical entity '{central_node_id}']")
 
+        author = props.get("author_agent", "Unknown")
+        last_mod = props.get("last_modified_by", author)
+        rationale = props.get("rationale")
+        intent = props.get("design_intent")
+        signature = props.get("signature")
+        docstring = props.get("docstring")
+        start_line = props.get("start_line")
+        end_line = props.get("end_line")
+        snippet = props.get("snippet")
+        history = props.get("history", [])
+
         output.extend([
             f"Entity: {central_node_id} ({label})",
+            f"Author Agent: {author} | Last Modified By: {last_mod}",
             f"Status: {status} | Created: {created_at} | Last Verified: {last_verified_at} | Last Updated: {updated_at}",
-            f"Metadata: {json.dumps(props, indent=2)}",
-            "Relationships:"
         ])
+
+        if signature:
+            output.append(f"Signature: {signature}")
+        if start_line and end_line:
+            output.append(f"Line Range: L{start_line}-L{end_line}")
+        if docstring:
+            output.append(f"Docstring: {docstring}")
+        if rationale:
+            output.append(f"Rationale: {rationale}")
+        if intent:
+            output.append(f"Design Intent: {intent}")
+
+        output.append(f"Metadata: {json.dumps(props, indent=2)}")
+
+        if history:
+            output.append("Decision History:")
+            for h in history[-5:]:
+                ts = h.get("timestamp", "")
+                ag = h.get("agent", "Agent")
+                rat = h.get("rationale") or h.get("action", "")
+                output.append(f"  • [{ts}] ({ag}): {rat}")
+
+        if snippet:
+            output.append(f"Code Snippet Preview:\n```\n{snippet}\n```")
+
+        output.append("Relationships:")
         
         edges = conn.execute("""
             SELECT relation_type, target_id, properties, created_at, last_verified_at 

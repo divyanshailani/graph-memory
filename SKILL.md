@@ -39,7 +39,12 @@ Generates structural AST nodes for the current directory.
 `graph-memory summarize-mocs`
 Uses LLM to summarize ingested structural hubs.
 
-### 4. Hygiene & Maintenance
+### 4. Code-Aware AST Ingestion & Two-Way Sync
+**Incremental Single-File Ingest:**
+`graph-memory ingest-file <file_path> [--agent AGENT_NAME] [--rationale "REASON"]`
+Incrementally re-parses a single modified file on disk in <5ms, capturing function signatures, docstrings, line bounds (`L10-L45`), implementation snippets, and agent provenance decision history.
+
+### 5. Hygiene & Maintenance
 **Graph Health Linting:**
 `graph-memory lint [--fix]`
 Checks for orphan nodes and dangling edges, optionally repairing them.

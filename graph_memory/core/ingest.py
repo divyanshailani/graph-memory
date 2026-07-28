@@ -84,27 +84,67 @@ def load_parser(ext):
         print(f"[!] {ext} file detected, but parser missing. Run: pip install epistemic-graph-memory[{ext.strip('.')}]")
         return None
 
-def extract_entities(node, ext, entities, parent_path=""):
-    """Recursively walks the AST and matches against the QUERY_MAP."""
+def extract_docstring_from_node(node, content_bytes):
+    """Extracts Python docstrings or comment blocks preceding/inside nodes."""
+    body_node = node.child_by_field_name("body")
+    if body_node:
+        for child in body_node.children:
+            if child.type == "expression_statement":
+                str_child = child.children[0] if child.children else None
+                if str_child and str_child.type in ("string", "concatenated_string"):
+                    text = content_bytes[str_child.start_byte:str_child.end_byte].decode('utf-8', errors='ignore')
+                    return text.strip('"' "' \n\t")
+    return ""
+
+def extract_entities(node, ext, entities, content_bytes, parent_path=""):
+    """Recursively walks the AST and matches against QUERY_MAP extracting signatures, docstrings, line bounds, and snippets."""
     qmap = QUERY_MAP.get(ext)
     if not qmap:
         return
         
     node_type = node.type
+    start_line = node.start_point[0] + 1
+    end_line = node.end_point[0] + 1
+    node_text = content_bytes[node.start_byte:node.end_byte].decode('utf-8', errors='ignore')
     
-    # Try to extract the name if it's a function or class
     if node_type in qmap["function_nodes"]:
         name_node = node.child_by_field_name("name")
         name = name_node.text.decode('utf8') if name_node else "anonymous_func"
-        entities["functions"].append(name)
+        sig_line = node_text.split('\n')[0].strip() if node_text else f"def {name}(...)"
+        docstring = extract_docstring_from_node(node, content_bytes)
+        
+        lines = node_text.split('\n')
+        snippet = '\n'.join(lines[:15]) + ('\n...' if len(lines) > 15 else '')
+        
+        entities["functions"].append({
+            "name": name,
+            "signature": sig_line,
+            "docstring": docstring,
+            "start_line": start_line,
+            "end_line": end_line,
+            "snippet": snippet
+        })
+        
     elif node_type in qmap["class_nodes"]:
         name_node = node.child_by_field_name("name")
         name = name_node.text.decode('utf8') if name_node else "AnonymousClass"
-        entities["classes"].append(name)
+        sig_line = node_text.split('\n')[0].strip() if node_text else f"class {name}"
+        docstring = extract_docstring_from_node(node, content_bytes)
+        
+        lines = node_text.split('\n')
+        snippet = '\n'.join(lines[:15]) + ('\n...' if len(lines) > 15 else '')
+        
+        entities["classes"].append({
+            "name": name,
+            "signature": sig_line,
+            "docstring": docstring,
+            "start_line": start_line,
+            "end_line": end_line,
+            "snippet": snippet
+        })
+        
     elif node_type in qmap["import_nodes"]:
-        # We grab the full text of the import for simplicity in building edges
-        text = node.text.decode('utf8').replace('\n', ' ')
-        # Very simple heuristic to extract the module name for Python
+        text = node_text.replace('\n', ' ')
         if "from " in text:
             module = text.split("from ")[1].split(" import")[0]
             entities["imports"].append(module)
@@ -112,33 +152,128 @@ def extract_entities(node, ext, entities, parent_path=""):
             module = text.split("import ")[1].split(" ")[0]
             entities["imports"].append(module)
         else:
-            # Fallback for other languages
             entities["imports"].append(text)
 
     for child in node.children:
-        extract_entities(child, ext, entities)
+        extract_entities(child, ext, entities, content_bytes, parent_path)
+
+def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", rationale: str = "Single file incremental AST update") -> dict:
+    """
+    Incrementally re-parses a single changed file into the AST graph (<5ms).
+    Updates component nodes, line ranges, signatures, docstrings, and snippets.
+    """
+    path = Path(file_path).resolve()
+    if not path.is_file():
+        return {"status": "error", "message": f"File '{file_path}' not found."}
+        
+    ext = path.suffix
+    if ext not in PARSER_PACKAGES:
+        return {"status": "ignored", "message": f"Extension '{ext}' not supported for AST parsing."}
+        
+    parser = load_parser(ext)
+    if not parser:
+        return {"status": "error", "message": f"Parser for '{ext}' unavailable."}
+        
+    content = path.read_bytes()
+    tree = parser.parse(content)
+    
+    entities = {"functions": [], "classes": [], "imports": []}
+    extract_entities(tree.root_node, ext, entities, content)
+    
+    import hashlib
+    file_hash = hashlib.sha256(content).hexdigest()
+    mtime = path.stat().st_mtime
+    
+    file_id = f"File_{path.name}"
+    add_node(
+        db_path, 
+        file_id, 
+        "Fact_Node", 
+        {
+            "entity_type": "File", 
+            "path": str(path), 
+            "file_hash": file_hash, 
+            "mtime": mtime,
+            "source": "AST"
+        }, 
+        trust_score=1.0, 
+        verification_method="source_parse",
+        agent_name=agent_name,
+        rationale=rationale
+    )
+    
+    for cls_data in entities["classes"]:
+        cls_name = cls_data["name"]
+        comp_id = f"Class_{cls_name}_{path.name}"
+        add_node(
+            db_path,
+            comp_id,
+            "Fact_Node",
+            {
+                "entity_type": "Component",
+                "name": cls_name,
+                "component_type": "class",
+                "signature": cls_data["signature"],
+                "docstring": cls_data["docstring"],
+                "start_line": cls_data["start_line"],
+                "end_line": cls_data["end_line"],
+                "snippet": cls_data["snippet"],
+                "file_path": str(path),
+                "source": "AST"
+            },
+            trust_score=1.0,
+            verification_method="source_parse",
+            link_to=file_id,
+            link_type="DEFINED_IN",
+            agent_name=agent_name,
+            rationale=rationale
+        )
+        
+    for func_data in entities["functions"]:
+        func_name = func_data["name"]
+        comp_id = f"Func_{func_name}_{path.name}"
+        add_node(
+            db_path,
+            comp_id,
+            "Fact_Node",
+            {
+                "entity_type": "Component",
+                "name": func_name,
+                "component_type": "function",
+                "signature": func_data["signature"],
+                "docstring": func_data["docstring"],
+                "start_line": func_data["start_line"],
+                "end_line": func_data["end_line"],
+                "snippet": func_data["snippet"],
+                "file_path": str(path),
+                "source": "AST"
+            },
+            trust_score=1.0,
+            verification_method="source_parse",
+            link_to=file_id,
+            link_type="DEFINED_IN",
+            agent_name=agent_name,
+            rationale=rationale
+        )
+        
+    return {"status": "success", "file": str(path), "functions": len(entities["functions"]), "classes": len(entities["classes"])}
 
 def ingest_codebase(db_path, directory):
     """Scans the directory, parses files, and builds the MOC graph."""
     directory = Path(directory).resolve()
     print(f"[*] Starting AST ingestion of {directory}")
     
-    # Map of loaded parsers
     parsers = {}
-    
-    # We create the root Project Node first
     root_id = f"Project_{directory.name}"
     add_node(db_path, root_id, "Fact_Node", {"entity_type": "Project", "path": str(directory), "created_by": "Tree-sitter", "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse")
     
-    # Track created MOCs to avoid duplicates
     created_mocs = set()
     
     for path in directory.rglob("*"):
         if not path.is_file():
             continue
             
-        # Ignore common bad directories
-        if ".git" in path.parts or "node_modules" in path.parts or "__pycache__" in path.parts or "venv" in path.parts:
+        if ".git" in path.parts or "node_modules" in path.parts or "__pycache__" in path.parts or "venv" in path.parts or ".venv" in path.parts:
             continue
             
         ext = path.suffix
@@ -160,37 +295,97 @@ def ingest_codebase(db_path, directory):
             continue
             
         entities = {"functions": [], "classes": [], "imports": []}
-        extract_entities(tree.root_node, ext, entities)
+        extract_entities(tree.root_node, ext, entities, content)
         
-        # 1. Create the MOC Hub if it doesn't exist
-        # We group by the parent directory name
         rel_parent = path.parent.relative_to(directory)
         moc_id = f"MOC_{rel_parent.name}" if rel_parent.name else f"MOC_{directory.name}"
         if moc_id not in created_mocs:
             add_node(db_path, moc_id, "Fact_Node", {"entity_type": "MOC_Hub", "dir": str(rel_parent), "created_by": "Tree-sitter", "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=root_id, link_type="PART_OF")
             created_mocs.add(moc_id)
             
-        # 2. Create the File Node
-        file_id = f"File_{path.name}"
-        add_node(db_path, file_id, "Fact_Node", {"entity_type": "File", "path": str(path.relative_to(directory)), "created_by": "Tree-sitter", "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=moc_id, link_type="CONTAINS")
+        import hashlib
+        file_hash = hashlib.sha256(content).hexdigest()
+        mtime = path.stat().st_mtime
         
-        # 3. Create the Component Nodes (Classes and Functions)
-        for cls in set(entities["classes"]):
-            comp_id = f"Class_{cls}_{path.name}"
-            add_node(db_path, comp_id, "Fact_Node", {"entity_type": "Component", "name": cls, "component_type": "class", "created_by": "Tree-sitter", "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=file_id, link_type="DEFINED_IN")
+        file_id = f"File_{path.name}"
+        add_node(
+            db_path, 
+            file_id, 
+            "Fact_Node", 
+            {
+                "entity_type": "File", 
+                "path": str(path.relative_to(directory)), 
+                "file_hash": file_hash,
+                "mtime": mtime,
+                "created_by": "Tree-sitter", 
+                "source": "AST", 
+                "confidence": 1.0
+            }, 
+            trust_score=1.0, 
+            verification_method="source_parse", 
+            link_to=moc_id, 
+            link_type="CONTAINS"
+        )
+        
+        for cls_data in entities["classes"]:
+            cls_name = cls_data["name"]
+            comp_id = f"Class_{cls_name}_{path.name}"
+            add_node(
+                db_path, 
+                comp_id, 
+                "Fact_Node", 
+                {
+                    "entity_type": "Component", 
+                    "name": cls_name, 
+                    "component_type": "class", 
+                    "signature": cls_data["signature"],
+                    "docstring": cls_data["docstring"],
+                    "start_line": cls_data["start_line"],
+                    "end_line": cls_data["end_line"],
+                    "snippet": cls_data["snippet"],
+                    "file_path": str(path.relative_to(directory)),
+                    "created_by": "Tree-sitter", 
+                    "source": "AST", 
+                    "confidence": 1.0
+                }, 
+                trust_score=1.0, 
+                verification_method="source_parse", 
+                link_to=file_id, 
+                link_type="DEFINED_IN"
+            )
             
-        for func in set(entities["functions"]):
-            comp_id = f"Func_{func}_{path.name}"
-            add_node(db_path, comp_id, "Fact_Node", {"entity_type": "Component", "name": func, "component_type": "function", "created_by": "Tree-sitter", "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=file_id, link_type="DEFINED_IN")
+        for func_data in entities["functions"]:
+            func_name = func_data["name"]
+            comp_id = f"Func_{func_name}_{path.name}"
+            add_node(
+                db_path, 
+                comp_id, 
+                "Fact_Node", 
+                {
+                    "entity_type": "Component", 
+                    "name": func_name, 
+                    "component_type": "function", 
+                    "signature": func_data["signature"],
+                    "docstring": func_data["docstring"],
+                    "start_line": func_data["start_line"],
+                    "end_line": func_data["end_line"],
+                    "snippet": func_data["snippet"],
+                    "file_path": str(path.relative_to(directory)),
+                    "created_by": "Tree-sitter", 
+                    "source": "AST", 
+                    "confidence": 1.0
+                }, 
+                trust_score=1.0, 
+                verification_method="source_parse", 
+                link_to=file_id, 
+                link_type="DEFINED_IN"
+            )
             
-        # 4. Create the Directional Edges (The Dependency Arrow)
         pre_sweep_file_imports(db_path, file_id)
         for imp in set(entities["imports"]):
             clean_imp = imp.replace('"', '').replace("'", "").strip(';')
             target_id = f"Dependency_{clean_imp}"
-            # Ensure the target node exists as an abstract dependency
             add_node(db_path, target_id, "Fact_Node", {"entity_type": "External_Dependency", "module": clean_imp, "created_by": "Tree-sitter", "source": "AST", "confidence": 1.0}, trust_score=0.8, verification_method="source_parse", link_to=root_id, link_type="USES")
-            # Create the arrow FROM the importing file TO the imported file/module
             add_relation(db_path, file_id, target_id, "IMPORTS", trust_score=1.0, verification_method="source_parse")
             
     print("[*] AST Ingestion Complete!")

@@ -241,11 +241,14 @@ wheels = [
 
 [[package]]
 name = "epistemic-graph-memory"
-version = "1.7.0"
+version = "1.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
     { name = "tree-sitter" },
+    { name = "tree-sitter-javascript" },
+    { name = "tree-sitter-python" },
+    { name = "tree-sitter-typescript" },
 ]
 
 [package.optional-dependencies]
@@ -278,12 +281,15 @@ requires-dist = [
     { name = "tree-sitter", specifier = ">=0.22.0" },
     { name = "tree-sitter-go", marker = "extra == 'all'" },
     { name = "tree-sitter-go", marker = "extra == 'go'" },
+    { name = "tree-sitter-javascript", specifier = ">=0.25.0" },
     { name = "tree-sitter-javascript", marker = "extra == 'all'" },
     { name = "tree-sitter-javascript", marker = "extra == 'javascript'" },
+    { name = "tree-sitter-python", specifier = ">=0.25.0" },
     { name = "tree-sitter-python", marker = "extra == 'all'" },
     { name = "tree-sitter-python", marker = "extra == 'python'" },
     { name = "tree-sitter-rust", marker = "extra == 'all'" },
     { name = "tree-sitter-rust", marker = "extra == 'rust'" },
+    { name = "tree-sitter-typescript", specifier = ">=0.23.2" },
     { name = "tree-sitter-typescript", marker = "extra == 'all'" },
     { name = "tree-sitter-typescript", marker = "extra == 'typescript'" },
 ]
