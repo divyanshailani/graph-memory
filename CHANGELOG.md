@@ -2,6 +2,11 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v2.1.1] - 2026-07-28
+- **Fixed `timedelta` NameError**: Added `timedelta` to top-level `datetime` imports in `engine.py` to fix runtime `NameError` on `query_decision_ledger(days=N)` query path.
+- **Effective Trust Threaded into Search Filtering**: Updated `search_nodes` to compute dynamic `calculate_effective_trust` for each candidate result and filter out stale entities below `min_trust` threshold.
+- **Effective Trust Threaded into Subgraph & Edge Retrieval**: Updated `serialize_subgraph` central node check and relationship traversal to calculate dynamic effective trust for central nodes and directional edges, ensuring retrieval filters reflect time-decayed truth.
+
 ## [v2.1.0] - 2026-07-28
 - **Dynamic Epistemic Truth Decay (Ebbinghaus Forgetting Curve)**: Added `calculate_effective_trust` and `get_effective_trust_for_node` to compute time-decayed trust score dynamically based on elapsed time since `last_verified_at` ($\text{effective\_trust} = \text{base\_trust} \times 0.5^{\frac{\Delta t}{30.0}}$).
 - **First-Class `Decision_Ledger` Table**: Created dedicated, indexed `Decision_Ledger` table in SQLite schema to log agent, node_id, action, rationale, and ISO timestamp.

@@ -2,7 +2,7 @@ import sqlite3
 import json
 import os
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # ---------------------------------------------------------------------------
 # Database Configuration
@@ -251,28 +251,37 @@ def query_decision_ledger(db_path: str, agent_name: str = None, node_id: str = N
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-def search_nodes(db_path: str, query: str, min_trust: float = 0.6) -> list:
+def search_nodes(db_path: str, query: str, min_trust: float = 0.6, half_life_days: float = 30.0) -> list:
     """
-    Full-Text Search across the graph using FTS5. Excludes soft-deleted nodes and those below trust threshold.
+    Full-Text Search across the graph using FTS5. Excludes soft-deleted nodes and those below effective trust threshold.
+    Calculates time-decayed effective trust score dynamically based on last_verified_at.
     """
     init_db(db_path)
     with get_connection(db_path) as conn:
         cursor = conn.execute("""
-            SELECT n.id, n.label, n.properties, n.status 
+            SELECT n.id, n.label, n.properties, n.status, n.trust_score, n.last_verified_at 
             FROM NodesFTS f
             JOIN Nodes n ON f.rowid = n.rowid
-            WHERE NodesFTS MATCH ? AND n.is_deleted = 0 AND n.trust_score >= ?
+            WHERE NodesFTS MATCH ? AND n.is_deleted = 0
             ORDER BY rank
-            LIMIT 20
-        """, (query, min_trust))
+            LIMIT 50
+        """, (query,))
         
         results = []
         for row in cursor.fetchall():
+            node_id, label, props_json, status, base_trust, last_verified_at = row
+            eff_trust = calculate_effective_trust(base_trust or 1.0, last_verified_at, half_life_days)
+            
+            if eff_trust < min_trust:
+                continue
+                
+            props = json.loads(props_json) if props_json else {}
             results.append({
-                "id": row[0],
-                "label": row[1],
-                "properties": json.loads(row[2]) if row[2] else {},
-                "status": row[3]
+                "id": node_id,
+                "label": label,
+                "properties": props,
+                "status": status,
+                "effective_trust": eff_trust
             })
             
             # Update access count to prevent memory decay
@@ -281,7 +290,10 @@ def search_nodes(db_path: str, query: str, min_trust: float = 0.6) -> list:
                     UPDATE Nodes 
                     SET access_count = access_count + 1, updated_at = ? 
                     WHERE id = ?
-                """, (now_iso(), row[0]))
+                """, (now_iso(), node_id))
+                
+            if len(results) >= 20:
+                break
                 
         return results
 
@@ -540,13 +552,19 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
         node = conn.execute("""
             SELECT label, properties, status, updated_at, created_at, last_verified_at, trust_score 
             FROM Nodes 
-            WHERE id = ? AND is_deleted = 0 AND trust_score >= ?
-        """, (central_node_id, min_trust)).fetchone()
+            WHERE id = ? AND is_deleted = 0
+        """, (central_node_id,)).fetchone()
         
         if not node:
-            return f"Node '{original_requested_id}' not found, deleted, or below trust threshold."
+            return f"Node '{original_requested_id}' not found or deleted."
             
         label, props_json, status, updated_at, created_at, last_verified_at, base_trust = node
+        base_t = base_trust if base_trust is not None else 1.0
+        eff_t = calculate_effective_trust(base_t, last_verified_at, half_life_days)
+        
+        if eff_t < min_trust:
+            return f"Node '{original_requested_id}' is below trust threshold (Effective Trust: {eff_t:.2f} < {min_trust:.2f})."
+            
         props = json.loads(props_json) if props_json else {}
         
         output = []
@@ -564,8 +582,6 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
         snippet = props.get("snippet")
         history = props.get("history", [])
 
-        base_t = base_trust if base_trust is not None else 1.0
-        eff_t = calculate_effective_trust(base_t, last_verified_at, half_life_days)
         pct_decay = round((1.0 - (eff_t / base_t)) * 100) if base_t > 0 else 0
 
         output.extend([
@@ -602,28 +618,40 @@ def serialize_subgraph(db_path: str, central_node_id: str, min_trust: float = 0.
         output.append("Relationships:")
         
         edges = conn.execute("""
-            SELECT relation_type, target_id, properties, created_at, last_verified_at 
+            SELECT relation_type, target_id, properties, created_at, last_verified_at, trust_score 
             FROM Edges 
-            WHERE source_id = ? AND trust_score >= ?
-        """, (central_node_id, min_trust)).fetchall()
+            WHERE source_id = ?
+        """, (central_node_id,)).fetchall()
         
-        if not edges:
+        valid_edges = []
+        for rel_type, target, e_props, c_at, v_at, e_trust in edges:
+            e_eff_t = calculate_effective_trust(e_trust or 1.0, v_at, half_life_days)
+            if e_eff_t >= min_trust:
+                valid_edges.append((rel_type, target, e_props, c_at, v_at, e_eff_t))
+                
+        if not valid_edges:
             output.append("  (None)")
         else:
-            for rel_type, target, e_props, c_at, v_at in edges:
-                output.append(f"  -[{rel_type}]-> {target} (Context: {e_props}, Created: {c_at}, Verified: {v_at})")
+            for rel_type, target, e_props, c_at, v_at, e_eff_t in valid_edges:
+                output.append(f"  -[{rel_type}]-> {target} (Effective Trust: {e_eff_t:.2f}, Context: {e_props}, Created: {c_at}, Verified: {v_at})")
                 
         # Also show incoming edges
         incoming_edges = conn.execute("""
-            SELECT source_id, relation_type, properties, created_at, last_verified_at 
+            SELECT source_id, relation_type, properties, created_at, last_verified_at, trust_score 
             FROM Edges 
-            WHERE target_id = ? AND trust_score >= ?
-        """, (central_node_id, min_trust)).fetchall()
+            WHERE target_id = ?
+        """, (central_node_id,)).fetchall()
         
-        if incoming_edges:
+        valid_incoming = []
+        for source, rel_type, e_props, c_at, v_at, e_trust in incoming_edges:
+            e_eff_t = calculate_effective_trust(e_trust or 1.0, v_at, half_life_days)
+            if e_eff_t >= min_trust:
+                valid_incoming.append((source, rel_type, e_props, c_at, v_at, e_eff_t))
+        
+        if valid_incoming:
             output.append("Incoming Relationships:")
-            for source, rel_type, e_props, c_at, v_at in incoming_edges:
-                output.append(f"  {source} -[{rel_type}]-> (this) (Context: {e_props}, Created: {c_at}, Verified: {v_at})")
+            for source, rel_type, e_props, c_at, v_at, e_eff_t in valid_incoming:
+                output.append(f"  {source} -[{rel_type}]-> (this) (Effective Trust: {e_eff_t:.2f}, Context: {e_props}, Created: {c_at}, Verified: {v_at})")
                 
         return "\n".join(output)
 
