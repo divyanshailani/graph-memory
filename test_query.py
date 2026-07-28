@@ -12,8 +12,8 @@ query = Query(lang, """
 (function_definition name: (identifier) @func)
 (class_definition name: (identifier) @class)
 """)
-cursor = QueryCursor()
-matches = cursor.captures(query, tree.root_node)
-for node, capture_index in matches:
-    name = query.capture_name(capture_index)
-    print(f"{name}: {node.text.decode('utf8')}")
+cursor = QueryCursor(query)
+matches = cursor.captures(tree.root_node)
+for capture_name, nodes in matches.items():
+    for node in nodes:
+        print(f"{capture_name}: {node.text.decode('utf8')}")

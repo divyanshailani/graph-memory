@@ -1,3 +1,8 @@
 .agents/
 __pycache__/
 *.sqlite
+.venv/
+.pytest_cache/
+dist/
+*.egg-info/
+.DS_Store

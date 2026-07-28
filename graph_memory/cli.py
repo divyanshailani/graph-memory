@@ -424,7 +424,7 @@ def main():
             <html>
             <head>
                 <title>Graph Memory Visualization</title>
-                <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+                <script type="text/javascript" src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
                 <style type="text/css">
                     body {{ background-color: #1e1e2e; margin: 0; padding: 0; overflow: hidden; font-family: system-ui; }}
                     #mynetwork {{ width: 100vw; height: 100vh; border: none; }}

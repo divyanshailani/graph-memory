@@ -43,3 +43,7 @@ graph-memory = "graph_memory.cli:main"
 graph-memory-mcp = "graph_memory.mcp.server:main"
 [tool.setuptools]
 packages = ["graph_memory"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+addopts = "--ignore=test_query.py"
