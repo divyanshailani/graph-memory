@@ -85,7 +85,7 @@ QUERY_MAP = {
 }
 
 def load_parser(ext):
-    """Dynamically loads the tree-sitter parser, warning if missing."""
+    """Dynamically loads tree-sitter language parser with multi-tier API fallbacks."""
     import tree_sitter
     package_name = PARSER_PACKAGES.get(ext)
     if not package_name:
@@ -95,21 +95,29 @@ def load_parser(ext):
     
     try:
         ts_module = importlib.import_module(module_name)
-        if ext == ".tsx" and hasattr(ts_module, "language_tsx"):
-            lang = tree_sitter.Language(ts_module.language_tsx())
-        elif hasattr(ts_module, "language"):
-            lang = tree_sitter.Language(ts_module.language())
-        elif hasattr(ts_module, "language_typescript") and module_name == "tree_sitter_typescript":
-            lang = tree_sitter.Language(ts_module.language_typescript())
-        else:
-            lang_func = getattr(ts_module, f"language_{module_name.split('_')[-1]}", None)
-            if lang_func:
-                lang = tree_sitter.Language(lang_func())
-            else:
-                raise AttributeError(f"Could not find language() or language_X() in {module_name}")
-                
-        parser = tree_sitter.Parser(lang)
-        return parser
+        lang_fn = None
+        ext_clean = ext.strip('.')
+        
+        # Tier 1: Extension-specific functions (e.g. language_tsx, language_jsx)
+        if ext == ".tsx":
+            lang_fn = getattr(ts_module, "language_tsx", None)
+        elif ext == ".jsx":
+            lang_fn = getattr(ts_module, "language_jsx", None)
+            
+        # Tier 2: Check language_<ext_clean>, language_<package_suffix>, or generic language()
+        if not lang_fn:
+            pkg_suffix = module_name.split('_')[-1]
+            lang_fn = (
+                getattr(ts_module, f"language_{ext_clean}", None)
+                or getattr(ts_module, f"language_{pkg_suffix}", None)
+                or getattr(ts_module, "language", None)
+            )
+            
+        if not lang_fn:
+            raise AttributeError(f"Could not find language() or language_X() in {module_name}")
+            
+        lang = tree_sitter.Language(lang_fn())
+        return tree_sitter.Parser(lang)
     except ImportError:
         print(f"[!] {ext} file detected, but parser missing. Run: pip install epistemic-graph-memory[{ext.strip('.')}]")
         return None
