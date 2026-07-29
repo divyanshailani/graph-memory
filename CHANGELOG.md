@@ -2,6 +2,10 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v2.1.2] - 2026-07-29
+- **Multi-Tier Tree-Sitter Language Package Fallback**: Refined `load_parser` in `ingest.py` with a multi-tier fallback resolution chain for extension-specific language functions (e.g. `language_tsx`, `language_jsx`, `language_typescript`), extension clean names, package suffixes, and generic `language()`, providing zero-crash compatibility across all old and new tree-sitter packages.
+- **Foreign Key Edge Stub Protection**: Added auto-creation of stub nodes in `get_or_create_node` and `create_relation` to maintain foreign key integrity when ingesting call graph edges to external standard library or un-parsed methods.
+
 ## [v2.1.1] - 2026-07-28
 - **Fixed `timedelta` NameError**: Added `timedelta` to top-level `datetime` imports in `engine.py` to fix runtime `NameError` on `query_decision_ledger(days=N)` query path.
 - **Effective Trust Threaded into Search Filtering**: Updated `search_nodes` to compute dynamic `calculate_effective_trust` for each candidate result and filter out stale entities below `min_trust` threshold.
