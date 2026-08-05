@@ -2,6 +2,10 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v3.2.3] - 2026-08-05
+- **Setuptools Package Discovery Fix**: Configured `tool.setuptools.packages.find` in `pyproject.toml` to automatically bundle all subpackages (`graph_memory.core`, `graph_memory.mcp`, `graph_memory.integrations`), ensuring 100% complete global wheel installations across all platforms.
+- **Circular Import Elimination**: Cleaned `graph_memory/integrations/__init__.py` and updated `cli.py` to perform explicit direct module imports for `framework_hooks`, ensuring 100% clean global execution across global system interpreters.
+
 ## [v3.2.2] - 2026-08-05
 - **Circular Import Elimination**: Cleaned `graph_memory/integrations/__init__.py` and updated `cli.py` to perform explicit direct module imports for `framework_hooks`, ensuring 100% clean global execution across global system interpreters.
 

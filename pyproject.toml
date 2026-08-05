@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "epistemic-graph-memory"
-version = "3.2.2"
+version = "3.2.3"
 authors = [
   { name="Divyansh Ailani" },
 ]
@@ -41,8 +41,8 @@ all = [
 [project.scripts]
 graph-memory = "graph_memory.cli:main"
 graph-memory-mcp = "graph_memory.mcp.server:main"
-[tool.setuptools]
-packages = ["graph_memory"]
+[tool.setuptools.packages.find]
+where = ["."]
 
 [tool.pytest.ini_options]
 testpaths = ["."]
