@@ -1,28 +1,60 @@
-# Epistemic Graph Memory
+# Epistemic Graph Memory (v3.0.0)
 
 ![Epistemic Graph Memory 2D UI Global View](assets/screenshot2.png)
 
-A local SQLite graph database designed to track long-term state and structural context for AI coding agents.
+A universal, long-term project memory and structural context tool for AI coding agents (Antigravity, Hermes, Claude, Cursor, Codex, OpenHands, Ollama).
 
-Exposed via the **Model Context Protocol (MCP)**, allowing agents (Claude Desktop, Cursor, Codex, OpenHands, Local Ollama agents, etc.) to query and update project blueprints synchronously.
+**Epistemic Graph Memory** provides a local, SQLite-backed knowledge graph with **Dynamic Epistemic Trust Decay**, **First-Class Decision Audit Ledgers**, **Codebase AST Call-Graph Awareness**, **Hermes-Class Prompt Snapshots**, and **Continuous Micro-Compaction**.
 
-## Features
-- **AST Parsing (`ingest-code`)**: Uses Tree-sitter to map local codebases into a node-edge graph hierarchy. Supports Python, TypeScript, JavaScript, Go, and Rust.
-- **REST Summary Pipeline (`summarize-mocs`)**: Auto-generates high-level module summaries via LLM APIs.
-- **Trust-Weighted Graph**: Employs trust scoring (`--trust`) to segment deterministic facts from AI-generated assumptions.
-- **Visualizations**: Generates local HTML exports for inspecting graph state.
-- **SQLite FTS5**: Backed by a standard `.agents/graph_memory.sqlite` file using FTS5 for query execution.
+Exposed natively via the **Model Context Protocol (MCP)** and CLI.
 
-## Installation
+---
+
+## 🌟 Core Features (v3.0.0)
+
+### 1. 🌲 Hermes-Class Declarative Memory & Auto-Recall Snapshots
+* **Prompt-Cache Friendly Snapshots (`graph-memory snapshot`)**: Automatically generates ultra-dense, 500-token Markdown snapshots of active, high-trust graph facts (`effective_trust >= 0.7`) and recent milestones to inject into LLM system prompts on session startup.
+* **Continuous Micro-Compaction (`distill_session`)**: Based on Hermes Agent micro-compaction principles, **verbatim user intent is preserved**, while large assistant tool outputs and file reads are continuously distilled into structured graph facts.
+* **Episodic Session Logging & FTS5 Search (`search-sessions`)**: Logs all multi-session conversation history into SQLite FTS5 for zero-friction historic turn retrieval.
+
+### 2. ⏳ Dynamic Epistemic Trust Decay
+* **Cognitive Forgetting Math**: Calculates dynamic, query-time trust decay without mutating baseline data:
+  $$\text{Effective Trust} = \text{Base Trust Score} \times \left(0.5^{\frac{\Delta t}{30.0}}\right)$$
+* **Automatic Re-Verification**: Re-verifying a node or re-parsing code updates `last_verified_at = now()`, immediately restoring effective trust to **100%**.
+* **Decay Retrieval Filtering**: `search_nodes` and `serialize_subgraph` automatically filter out stale entities below `min_trust`.
+
+### 3. 📜 First-Class Multi-Agent Decision Ledger
+* **Append-Only Audit Trail (`Decision_Ledger`)**: Tracks *which* agent made *what* decision, *why* (rationale), and *when*.
+* **CLI & MCP Querying**: Query decision history by agent, node ID, or timeframe (`graph-memory query-history --agent Hermes`).
+
+### 4. 🔍 Codebase AST & Call Graph Awareness
+* **Polyglot AST Ingestion (`ingest-code`)**: Deterministic parsing of Python, TypeScript (`.ts`, `.tsx`), JavaScript (`.js`, `.jsx`), Go, and Rust repositories via Tree-sitter.
+* **Production Call Graphs & Inheritance**: Extracts function call chains (`Func_A -[CALLS]-> Func_B`) and class inheritance (`Class_Sub -[EXTENDS]-> Class_Base`).
+* **Code Snippets & Line Bounds**: Extracts exact function signatures, docstrings, line bounds (`L10-L45`), and code snippets (`read_code_snippet`).
+* **<5ms Single-File Re-parsing (`ingest-file`)**: Incremental single-file re-parsing for instant updates during editing.
+* **Ghost Component Pruning**: Automatically prunes obsolete function/class nodes when source files are updated.
+
+### 5. 🔀 Entity Merging & Canonical Pointers
+* **Soft-Delete Merging (`merge_nodes` / `merge`)**: Merges duplicate entities with canonical pointer resolution (`resolve_canonical_id`), alias array tracking, and full history propagation.
+
+### 6. 🎨 2D & GPU-Accelerated 3D Visualizations
+* **Interactive HTML Export (`export_html`)**: Visualizes graph nodes, relationships, and trust scores in interactive 2D.
+* **3D WebGL Viewer (`export-3d`)**: GPU-accelerated 3D force-directed graph visualizer (`vis-network@9.1.9`).
+
+---
+
+## 📦 Installation
 
 ```bash
 pip install epistemic-graph-memory[all]
 ```
-*Note: The `[all]` extra installs polyglot Tree-sitter AST bindings.*
+*Note: The `[all]` extra installs polyglot Tree-sitter AST parser bindings.*
 
-## MCP Server Configuration
+---
 
-Standard MCP integration. Add the following to your AI framework's configuration:
+## 🔌 MCP Server Configuration
+
+To use Epistemic Graph Memory natively inside Claude Desktop, Cursor, Antigravity, Hermes, or Codex, add the following to your MCP configuration:
 
 ```json
 {
@@ -34,77 +66,88 @@ Standard MCP integration. Add the following to your AI framework's configuration
 }
 ```
 
-## Quickstart
+---
 
-Initialize a codebase:
+## 🚀 Quickstart
 
+### 1. Ingest Codebase AST & Build Graph
 ```bash
-# 1. Map repository AST
-graph-memory ingest-code ./src
-
-# 2. Generate module summaries (Requires GEMINI_API_KEY)
-export GEMINI_API_KEY="your_api_key_here"
-graph-memory summarize-mocs
-```
-
-## CLI Reference
-
-The `graph-memory` CLI accesses the local database at `.agents/graph_memory.sqlite`.
-
-```bash
-# Ingest Code & Auto-Summarize
+# Parse full codebase AST, call graphs, and inheritance
 graph-memory ingest-code .
-graph-memory summarize-mocs
 
-# Add Entity / Relation
-graph-memory add_node "Postgres_DB" "Database" '{"observations": ["Found in docker-compose."]}'
-graph-memory add_relation "Server_VM" "HAS_DB" "Postgres_DB"
-
-# Query
-graph-memory get_node "Postgres_DB"
-graph-memory search "Assumed based on backend"
-
-# Maintenance & Export
-graph-memory sweep
-graph-memory export_html my_graph.html
+# Incrementally re-parse a single modified file (<5ms)
+graph-memory ingest-file graph_memory/core/engine.py --agent Antigravity --rationale "Refactored trust decay"
 ```
 
-To override the default database location:
+### 2. Generate Active Prompt Snapshot (Hermes Auto-Recall)
 ```bash
-export GRAPH_MEMORY_DB_PATH="/path/to/database.sqlite"
+# Output prompt-cache friendly Markdown snapshot for system prompt injection
+graph-memory snapshot --max-tokens 600 --min-trust 0.7
 ```
 
-## Advanced Schema (Agent Protocols)
+### 3. Query Decision History & Search
+```bash
+# Query agent decision audit ledger
+graph-memory query-history --agent Hermes --limit 10
 
-Graph-Memory's `--trust` flag is augmented by enforcing a strict JSON metadata schema within the `[attributes_json]` field. When autonomous agents (Claude, Codex, Antigravity) log nodes and relations, they must standardize three core paradigms:
+# FTS5 search across graph nodes
+graph-memory search "effective trust"
 
-1. **Multi-Agent Provenance & Tool Sourcing:**
-   Record *who* created the knowledge and *where* it came from.
-   ```json
-   {"created_by": "Claude", "source": "AST", "verified_by": "Human"}
-   ```
+# FTS5 search across episodic session logs
+graph-memory search-sessions "tree-sitter fallback"
+```
 
-2. **Expanded Trust Protocol:**
-   Rather than just passing a flat `--trust` float, agents inject deeper confidence metrics.
-   ```json
-   {"confidence": 0.8, "verification_source": "pytest", "last_verified": "2026-07-20"}
-   ```
+### 4. Graph Maintenance & 3D Visualization
+```bash
+# Lint for orphan nodes and dangling edges
+graph-memory lint --fix
 
-3. **Node Distinctions & Execution Workflows:**
-   Nodes must adhere to strict type ontologies to separate deterministic structure from history:
-   - `Fact_Node`: Deterministic ground-truth (AST, Git, filesystem).
-   - `Knowledge_Node`: Architecture, Design decisions, LLM summaries.
-   - `Episode_Node`: Execution workflows, completed task sequences ("How was this bug fixed?"). Agents link `Episode_Node` steps using `FOLLOWED_BY` edges.
+# Perform SQLite database vacuum
+graph-memory consolidate
 
-## Inspiration & Lineage
+# Export WebGL 3D GPU-Accelerated Graph Viewer
+graph-memory export-3d memory_3d.html
+```
 
-Graph-Memory was heavily inspired by the [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf). 
+---
 
-**What we adopted from OKF:**
-- The philosophy of a universal, vendor-neutral knowledge format for AI agents.
-- The emphasis on explicit, graph-shaped relationships between concepts (rather than flat text).
+## 🛠️ MCP Tool Reference
 
-**Where we diverged:**
-- **Storage:** Instead of static Markdown files (which agents struggle to mutate safely), we use a true local SQLite graph database with FTS5 indexing.
-- **Ingestion:** Instead of blind LLM extraction, we use deterministic AST parsing (Tree-sitter) to mathematically guarantee code structural accuracy.
-- **Verification:** We implement explicit `--trust` scoring in the SQL schema to isolate and quarantine AI hallucinations.
+| MCP Tool | Description |
+| :--- | :--- |
+| `get_active_snapshot` | Returns prompt-cache friendly Markdown snapshot of active high-trust graph facts. |
+| `distill_session` | Performs continuous micro-compaction and fact distillation on session turns. |
+| `search_session_history` | Searches historical conversation transcripts using SQLite FTS5. |
+| `query_decision_history` | Queries global `Decision_Ledger` by agent, node ID, or timeframe. |
+| `read_code_snippet` | Retrieves exact AST signature, docstring, line bounds, and source code snippet. |
+| `ingest_file` | Incrementally re-parses a single changed file into the AST graph (<5ms). |
+| `merge_entities` | Merges source entity into target entity with canonical pointer redirect. |
+| `create_entities` | Creates multiple entities with trust scores and observation payloads. |
+| `create_relations` | Creates directional relations between entities with trust metrics. |
+| `search_nodes` | FTS5 search across entity names, types, and observation content. |
+| `open_nodes` | Serializes subgraphs around specific central nodes. |
+| `read_graph` | Serializes complete knowledge graph. |
+
+---
+
+## 💡 Architecture Protocols
+
+### Entity Ontologies
+- **`Fact_Node`**: Ground-truth facts derived deterministically from AST, Git, or session distillation.
+- **`Knowledge_Node`**: High-level architecture, module summaries, and design decisions.
+- **`Episode_Node`**: Workflows, completed task sequences, and milestone records (linked with `FOLLOWED_BY` edges).
+- **`Release_Node`**: Formally published software versions and package release records.
+
+---
+
+## 📜 Lineage & Acknowledgments
+
+Graph-Memory was inspired by the [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf) and the **Hermes Agent** memory architecture.
+
+* **SQLite WAL & FTS5**: Powered by local SQLite WAL mode for concurrent multi-agent safety and FTS5 for high-speed indexing.
+* **Tree-Sitter**: Powered by Tree-sitter for polyglot AST parsing.
+
+---
+
+## 📄 License
+MIT License. Created by Divyansh Ailani.
