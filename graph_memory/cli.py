@@ -92,6 +92,17 @@ def main():
     query_history_parser.add_argument("--days", type=int, help="Filter entries from last N days")
     query_history_parser.add_argument("--limit", type=int, default=50, help="Max entries to return")
 
+    # Snapshot
+    snapshot_parser = subparsers.add_parser("snapshot", help="Generate prompt-cache friendly Markdown snapshot of active high-trust memory")
+    snapshot_parser.add_argument("--max-tokens", type=int, default=600, help="Max tokens limit budget (default: 600)")
+    snapshot_parser.add_argument("--min-trust", type=float, default=0.7, help="Minimum effective trust threshold (default: 0.7)")
+
+    # Search Sessions
+    search_sessions_parser = subparsers.add_parser("search-sessions", help="Search historical session conversation logs using FTS5")
+    search_sessions_parser.add_argument("query", help="Search query string")
+    search_sessions_parser.add_argument("--session-id", type=str, help="Optional filter by session ID")
+    search_sessions_parser.add_argument("--limit", type=int, default=20, help="Max logs to return")
+
     args = parser.parse_args()
     
     db_path = args.db or engine.get_db_path()
@@ -181,6 +192,15 @@ def main():
 
         elif args.command == "query-history":
             res = engine.query_decision_ledger(db_path, agent_name=args.agent, node_id=args.node_id, days=args.days, limit=args.limit)
+            print(json.dumps(res, indent=2))
+
+        elif args.command == "snapshot":
+            from graph_memory.core.snapshot import generate_active_snapshot
+            snap = generate_active_snapshot(db_path, max_tokens=args.max_tokens, min_trust=args.min_trust)
+            print(snap)
+
+        elif args.command == "search-sessions":
+            res = engine.search_session_logs(db_path, args.query, session_id=args.session_id, limit=args.limit)
             print(json.dumps(res, indent=2))
 
         elif args.command == "merge":

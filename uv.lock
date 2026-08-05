@@ -241,7 +241,7 @@ wheels = [
 
 [[package]]
 name = "epistemic-graph-memory"
-version = "2.1.2"
+version = "3.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },

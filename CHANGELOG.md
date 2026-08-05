@@ -2,6 +2,12 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v3.0.0] - 2026-08-05
+- **Hermes-Class Declarative Snapshot Engine**: Added `graph_memory/core/snapshot.py` and `get_active_snapshot` MCP tool to generate ultra-dense, 500-token prompt-cache friendly Markdown snapshots of high-trust facts for automatic prompt injection on session startup.
+- **Asymmetric Continuous Micro-Compactor & Distiller**: Added `graph_memory/core/distill.py` and `distill_session` MCP tool to absorb large assistant tool outputs and distill them into structured graph facts while preserving verbatim user intent.
+- **Episodic Session Logging & FTS5 Search**: Added `Session_Logs` table, `Session_Logs_fts` virtual table, and `search_session_logs` engine function for searching historic conversation logs.
+- **CLI Subcommands**: Added `graph-memory snapshot` and `graph-memory search-sessions` subcommands.
+
 ## [v2.1.2] - 2026-07-29
 - **Multi-Tier Tree-Sitter Language Package Fallback**: Refined `load_parser` in `ingest.py` with a multi-tier fallback resolution chain for extension-specific language functions (e.g. `language_tsx`, `language_jsx`, `language_typescript`), extension clean names, package suffixes, and generic `language()`, providing zero-crash compatibility across all old and new tree-sitter packages.
 - **Foreign Key Edge Stub Protection**: Added auto-creation of stub nodes in `get_or_create_node` and `create_relation` to maintain foreign key integrity when ingesting call graph edges to external standard library or un-parsed methods.

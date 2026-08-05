@@ -123,6 +123,20 @@ def init_db(db_path: str):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_agent ON Decision_Ledger(agent_name);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_node ON Decision_Ledger(node_id);")
 
+            # Session_Logs Table & FTS5 Index (Episodic Multi-Session Archive)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS Session_Logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    agent_name TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    timestamp TEXT NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON Session_Logs(session_id);")
+            conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS Session_Logs_fts USING fts5(session_id, agent_name, role, content);")
+
             # Migration for existing databases
             try:
                 conn.execute("ALTER TABLE Nodes ADD COLUMN trust_score FLOAT DEFAULT 1.0")
@@ -239,6 +253,63 @@ def query_decision_ledger(db_path: str, agent_name: str = None, node_id: str = N
                 "agent_name": r[2],
                 "action": r[3],
                 "rationale": r[4],
+                "timestamp": r[5]
+            }
+            for r in rows
+        ]
+
+def log_session_message(db_path: str, session_id: str, agent_name: str, role: str, content: str) -> int:
+    """Logs a conversation message into Session_Logs and updates FTS5 index."""
+    init_db(db_path)
+    ts = now_iso()
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            cursor = conn.execute("""
+                INSERT INTO Session_Logs (session_id, agent_name, role, content, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+            """, (session_id, agent_name, role, content, ts))
+            row_id = cursor.lastrowid
+            try:
+                conn.execute("""
+                    INSERT INTO Session_Logs_fts (rowid, session_id, agent_name, role, content)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (row_id, session_id, agent_name, role, content))
+            except sqlite3.OperationalError:
+                pass
+            return row_id
+
+def search_session_logs(db_path: str, query_str: str, session_id: str = None, limit: int = 20) -> list:
+    """Performs FTS5 search across historic session logs."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        formatted_query = ' OR '.join(query_str.split()) if '"' not in query_str else query_str
+        sql = """
+            SELECT s.id, s.session_id, s.agent_name, s.role, s.content, s.timestamp
+            FROM Session_Logs s
+            JOIN Session_Logs_fts fts ON s.id = fts.rowid
+            WHERE Session_Logs_fts MATCH ?
+        """
+        params = [formatted_query]
+        if session_id:
+            sql += " AND s.session_id = ?"
+            params.append(session_id)
+        sql += " ORDER BY s.id DESC LIMIT ?"
+        params.append(limit)
+        
+        try:
+            rows = conn.execute(sql, params).fetchall()
+        except sqlite3.OperationalError:
+            # Fallback to LIKE if FTS expression fails
+            sql_fallback = "SELECT id, session_id, agent_name, role, content, timestamp FROM Session_Logs WHERE content LIKE ? ORDER BY id DESC LIMIT ?"
+            rows = conn.execute(sql_fallback, (f"%{query_str}%", limit)).fetchall()
+            
+        return [
+            {
+                "id": r[0],
+                "session_id": r[1],
+                "agent_name": r[2],
+                "role": r[3],
+                "content": r[4],
                 "timestamp": r[5]
             }
             for r in rows

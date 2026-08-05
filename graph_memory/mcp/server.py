@@ -257,6 +257,56 @@ async def handle_list_tools() -> list[types.Tool]:
                 }
             }
         ),
+        types.Tool(
+            name="get_active_snapshot",
+            description="Get an ultra-dense, prompt-cache friendly Markdown snapshot of active high-trust memory facts and recent milestones.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "max_tokens": {"type": "integer", "description": "Token limit budget for snapshot (default 600)."},
+                    "min_trust": {"type": "number", "description": "Minimum effective trust threshold (default 0.7)."}
+                }
+            }
+        ),
+        types.Tool(
+            name="distill_session",
+            description="Perform continuous micro-compaction and fact distillation on raw session messages while preserving user intent.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "session_id": {"type": "string", "description": "Unique session identifier."},
+                    "agentName": {"type": "string", "description": "Name of the agent (e.g. Hermes, Antigravity)."},
+                    "exchanges": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "role": {"type": "string"},
+                                "content": {"type": "string"}
+                            },
+                            "required": ["role", "content"]
+                        }
+                    }
+                },
+                "required": ["session_id", "agentName", "exchanges"]
+            }
+        ),
+        types.Tool(
+            name="search_session_history",
+            description="Search historical session conversation logs using FTS5 full-text search.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "query": {"type": "string", "description": "Search query string."},
+                    "session_id": {"type": "string", "description": "Optional filter by session ID."},
+                    "limit": {"type": "integer", "description": "Maximum logs to return (default 20)."}
+                },
+                "required": ["query"]
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -382,6 +432,28 @@ async def handle_call_tool(
             days = arguments.get("days")
             limit = arguments.get("limit", 50)
             res = engine.query_decision_ledger(actual_db_path, agent_name=agent_name, node_id=node_id, days=days, limit=limit)
+            return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
+
+        elif name == "get_active_snapshot":
+            max_tokens = arguments.get("max_tokens", 600)
+            min_trust = arguments.get("min_trust", 0.7)
+            from graph_memory.core.snapshot import generate_active_snapshot
+            snap = generate_active_snapshot(actual_db_path, max_tokens=max_tokens, min_trust=min_trust)
+            return [types.TextContent(type="text", text=snap)]
+
+        elif name == "distill_session":
+            session_id = arguments.get("session_id", "default_session")
+            agent_name = arguments.get("agentName", "Agent")
+            exchanges = arguments.get("exchanges", [])
+            from graph_memory.core.distill import distill_session_exchanges
+            res = distill_session_exchanges(actual_db_path, session_id, agent_name, exchanges)
+            return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
+
+        elif name == "search_session_history":
+            query = arguments.get("query", "")
+            session_id = arguments.get("session_id")
+            limit = arguments.get("limit", 20)
+            res = engine.search_session_logs(actual_db_path, query, session_id=session_id, limit=limit)
             return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
 
         else:
