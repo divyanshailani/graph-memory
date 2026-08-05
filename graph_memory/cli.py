@@ -209,7 +209,7 @@ def main():
             print(json.dumps(res, indent=2))
 
         elif args.command == "hook":
-            from graph_memory.integrations import framework_hooks
+            import graph_memory.integrations.framework_hooks as framework_hooks
             if args.action == "install":
                 res = framework_hooks.install_hooks(target_framework=args.framework, db_path=db_path)
                 print(json.dumps(res, indent=2))

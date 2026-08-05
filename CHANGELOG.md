@@ -2,6 +2,9 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v3.2.2] - 2026-08-05
+- **Circular Import Elimination**: Cleaned `graph_memory/integrations/__init__.py` and updated `cli.py` to perform explicit direct module imports for `framework_hooks`, ensuring 100% clean global execution across global system interpreters.
+
 ## [v3.2.1] - 2026-08-05
 - **Global Package Integration Export Fix**: Added `from . import framework_hooks` in `graph_memory/integrations/__init__.py` to resolve global package import resolution across global system environments.
 - **Enterprise Cross-Platform Robustness**: Dynamic multi-OS path resolution for Windows (`%APPDATA%`), macOS (`~/Library/Application Support`), and Linux (`XDG_CONFIG_HOME` / `~/.config`).
