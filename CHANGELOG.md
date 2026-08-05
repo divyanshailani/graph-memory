@@ -2,6 +2,16 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v3.2.1] - 2026-08-05
+- **Global Package Integration Export Fix**: Added `from . import framework_hooks` in `graph_memory/integrations/__init__.py` to resolve global package import resolution across global system environments.
+- **Enterprise Cross-Platform Robustness**: Dynamic multi-OS path resolution for Windows (`%APPDATA%`), macOS (`~/Library/Application Support`), and Linux (`XDG_CONFIG_HOME` / `~/.config`).
+- **Atomic File Backups & Zero-Corruption Guarantee**: Implemented `atomic_write_json` with automated timestamped `.bak` backups before modifying JSON configurations, ensuring safe atomic replaces (`tempfile` + `os.replace`).
+- **Graceful Exception Boundaries**: Framework hooks catch missing paths, permission denials, and malformed files gracefully, returning structured `{"status": "skipped", "message": "..."}` without throwing unhandled exceptions or breaking agent execution.
+- **Framework Auto-Memory Bindings (`graph-memory hook`)**: Introduced optional, user-controlled framework hooks for Antigravity, Claude Code CLI, Claude Desktop, Codex, and Hermes.
+- **Claude Desktop AUTO-SNAPSHOT**: Prepends dynamic active memory snapshot to seed context when `GRAPH_MEMORY_AUTO_SNAPSHOT=1` is set in MCP configuration.
+- **Non-Breaking Safety Guarantee**: Hooks operate purely via non-destructive sidecar rules, skill Markdown files, and MCP env flags, preserving 100% native stability.
+- **CLI Commands**: Added `graph-memory hook install`, `graph-memory hook uninstall`, and `graph-memory hook status`.
+
 ## [v3.2.0] - 2026-08-05
 - **Enterprise Cross-Platform Robustness**: Dynamic multi-OS path resolution for Windows (`%APPDATA%`), macOS (`~/Library/Application Support`), and Linux (`XDG_CONFIG_HOME` / `~/.config`).
 - **Atomic File Backups & Zero-Corruption Guarantee**: Implemented `atomic_write_json` with automated timestamped `.bak` backups before modifying JSON configurations, ensuring safe atomic replaces (`tempfile` + `os.replace`).
