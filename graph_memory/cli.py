@@ -103,6 +103,11 @@ def main():
     search_sessions_parser.add_argument("--session-id", type=str, help="Optional filter by session ID")
     search_sessions_parser.add_argument("--limit", type=int, default=20, help="Max logs to return")
 
+    # Hook
+    hook_parser = subparsers.add_parser("hook", help="Manage optional framework-native auto-memory bindings")
+    hook_parser.add_argument("action", choices=["install", "uninstall", "status"], help="Action: install, uninstall, or status")
+    hook_parser.add_argument("--framework", choices=["antigravity", "claude-code", "claude-desktop", "codex", "hermes", "all"], default="all", help="Target framework (default: all)")
+
     args = parser.parse_args()
     
     db_path = args.db or engine.get_db_path()
@@ -202,6 +207,18 @@ def main():
         elif args.command == "search-sessions":
             res = engine.search_session_logs(db_path, args.query, session_id=args.session_id, limit=args.limit)
             print(json.dumps(res, indent=2))
+
+        elif args.command == "hook":
+            from graph_memory.integrations import framework_hooks
+            if args.action == "install":
+                res = framework_hooks.install_hooks(target_framework=args.framework, db_path=db_path)
+                print(json.dumps(res, indent=2))
+            elif args.action == "uninstall":
+                res = framework_hooks.uninstall_hooks(target_framework=args.framework)
+                print(json.dumps(res, indent=2))
+            elif args.action == "status":
+                res = framework_hooks.get_hook_status()
+                print(json.dumps(res, indent=2))
 
         elif args.command == "merge":
             res = engine.merge_nodes(db_path, args.source_id, args.target_id)

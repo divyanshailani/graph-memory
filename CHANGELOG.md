@@ -2,6 +2,12 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v3.1.0] - 2026-08-05
+- **Framework Auto-Memory Bindings (`graph-memory hook`)**: Introduced optional, user-controlled framework hooks for Antigravity, Claude Code CLI, Claude Desktop, Codex, and Hermes.
+- **Claude Desktop AUTO-SNAPSHOT**: Prepends dynamic active memory snapshot to seed context when `GRAPH_MEMORY_AUTO_SNAPSHOT=1` is set in MCP configuration.
+- **Non-Breaking Safety Guarantee**: Hooks operate purely via non-destructive sidecar rules, skill Markdown files, and MCP env flags, preserving 100% native stability.
+- **CLI Commands**: Added `graph-memory hook install`, `graph-memory hook uninstall`, and `graph-memory hook status`.
+
 ## [v3.0.0] - 2026-08-05
 - **Hermes-Class Declarative Snapshot Engine**: Added `graph_memory/core/snapshot.py` and `get_active_snapshot` MCP tool to generate ultra-dense, 500-token prompt-cache friendly Markdown snapshots of high-trust facts for automatic prompt injection on session startup.
 - **Asymmetric Continuous Micro-Compactor & Distiller**: Added `graph_memory/core/distill.py` and `distill_session` MCP tool to absorb large assistant tool outputs and distill them into structured graph facts while preserving verbatim user intent.

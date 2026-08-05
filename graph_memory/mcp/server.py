@@ -24,6 +24,10 @@ async def handle_list_tools() -> list[types.Tool]:
     This makes the package a "Drop-In Replacement" for the official memory server.
     """
     seed_context = engine.get_seed_memory(DB_PATH)
+    if os.environ.get("GRAPH_MEMORY_AUTO_SNAPSHOT") == "1":
+        from graph_memory.core.snapshot import generate_active_snapshot
+        snapshot_str = generate_active_snapshot(DB_PATH, max_tokens=400, min_trust=0.7)
+        seed_context = f"{seed_context} | AUTO-SNAPSHOT: {snapshot_str}"
     return [
         types.Tool(
             name="create_entities",
