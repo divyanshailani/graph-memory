@@ -258,6 +258,24 @@ def extract_entities(node, ext, entities, content_bytes, parent_path="", depth=0
     for child in node.children:
         extract_entities(child, ext, entities, content_bytes, parent_path, depth + 1)
 
+DEFAULT_IGNORE_DIRS = {
+    "node_modules", "venv", ".venv", "env", ".env", "site-packages",
+    "dist", "build", "target", "out", "__pycache__", ".git", ".hg", ".svn",
+    ".tox", ".eggs", ".egg-info", ".pytest_cache", ".mypy_cache", ".cache",
+    ".next", ".nuxt", "vendor"
+}
+
+def should_ignore_path(path: Path) -> bool:
+    """Returns True if path is inside virtualenv, node_modules, build/dist, or cache directories."""
+    parts = set(path.parts)
+    if parts.intersection(DEFAULT_IGNORE_DIRS):
+        return True
+    for part in path.parts:
+        lower_part = part.lower()
+        if "site-packages" in lower_part or "venv" in lower_part or lower_part.endswith(".egg-info") or lower_part.endswith("-info"):
+            return True
+    return False
+
 def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", rationale: str = "Single file incremental AST update") -> dict:
     """
     Incrementally re-parses a single changed file into the AST graph (<5ms).
@@ -268,6 +286,9 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
     path = Path(file_path).resolve()
     if not path.is_file():
         return {"status": "error", "message": f"File '{file_path}' not found."}
+        
+    if should_ignore_path(path):
+        return {"status": "ignored", "message": f"File '{file_path}' is inside an ignored directory or third-party dependency package."}
         
     if path.stat().st_size > MAX_FILE_SIZE:
         return {"status": "ignored", "message": f"File '{path.name}' ({path.stat().st_size} bytes) exceeds maximum allowed size of 10MB."}
@@ -395,7 +416,7 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
         if not path.is_file():
             continue
             
-        if ".git" in path.parts or "node_modules" in path.parts or "__pycache__" in path.parts or "venv" in path.parts or ".venv" in path.parts:
+        if should_ignore_path(path):
             continue
             
         if path.stat().st_size > MAX_FILE_SIZE:

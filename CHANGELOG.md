@@ -2,6 +2,12 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v3.2.4] - 2026-08-08
+- **AST Ingestion Scoping Isolation**: Implemented `should_ignore_path` in `graph_memory/core/ingest.py` to strictly exclude third-party dependencies, virtual environments (`venv`, `.venv`, `env`, `site-packages`), `node_modules`, `dist`, `build`, `target`, and cache directories from AST graph ingestion.
+- **Stale Graph Memory Correction**: Updated Package node `epistemic-graph-memory` metadata in active project database to reflect `v3.2.4` global PyPI release state.
+- **Setuptools Package Discovery Fix**: Configured `tool.setuptools.packages.find` in `pyproject.toml` to automatically bundle all subpackages (`graph_memory.core`, `graph_memory.mcp`, `graph_memory.integrations`), ensuring 100% complete global wheel installations across all platforms.
+- **Circular Import Elimination**: Cleaned `graph_memory/integrations/__init__.py` and updated `cli.py` to perform explicit direct module imports for `framework_hooks`, ensuring 100% clean global execution across global system interpreters.
+
 ## [v3.2.3] - 2026-08-05
 - **Setuptools Package Discovery Fix**: Configured `tool.setuptools.packages.find` in `pyproject.toml` to automatically bundle all subpackages (`graph_memory.core`, `graph_memory.mcp`, `graph_memory.integrations`), ensuring 100% complete global wheel installations across all platforms.
 - **Circular Import Elimination**: Cleaned `graph_memory/integrations/__init__.py` and updated `cli.py` to perform explicit direct module imports for `framework_hooks`, ensuring 100% clean global execution across global system interpreters.
