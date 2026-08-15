@@ -12,6 +12,8 @@ graph_memory/core/__init__.py
 graph_memory/core/distill.py
 graph_memory/core/engine.py
 graph_memory/core/ingest.py
+graph_memory/core/knowledge.py
+graph_memory/core/memory.py
 graph_memory/core/snapshot.py
 graph_memory/core/summarizer.py
 graph_memory/integrations/__init__.py

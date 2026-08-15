@@ -311,6 +311,41 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["query"]
             }
         ),
+        types.Tool(
+            name="generate_repo_wiki",
+            description="Generate hierarchical Markdown Repo Wiki matching Qoder schema.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "target_dir": {"type": "string", "description": "Target output directory (default: .agents/wiki)."},
+                    "repo_name": {"type": "string", "description": "Repository name (default: Project)."},
+                    "branch": {"type": "string", "description": "Branch name (default: main)."}
+                }
+            }
+        ),
+        types.Tool(
+            name="get_knowledge_cards",
+            description="Extract domain Knowledge Cards across 8 software domains (frontend_style, backend_architecture, build_system, logging_system, configuration_system, dependency_management, error_handling, external_dependency).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "target_dir": {"type": "string", "description": "Target output directory (default: .agents/wiki)."}
+                }
+            }
+        ),
+        types.Tool(
+            name="reflect_session_memory",
+            description="Reflect session history and decision ledger into persistent memory cards.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "target_dir": {"type": "string", "description": "Target output directory (default: .agents)."}
+                }
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -458,6 +493,26 @@ async def handle_call_tool(
             session_id = arguments.get("session_id")
             limit = arguments.get("limit", 20)
             res = engine.search_session_logs(actual_db_path, query, session_id=session_id, limit=limit)
+            return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
+
+        elif name == "generate_repo_wiki":
+            target_dir = arguments.get("target_dir", ".agents/wiki")
+            repo_name = arguments.get("repo_name", "Project")
+            branch = arguments.get("branch", "main")
+            from graph_memory.core.knowledge import generate_repo_wiki
+            res = generate_repo_wiki(actual_db_path, target_dir, repo_name=repo_name, branch=branch)
+            return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
+
+        elif name == "get_knowledge_cards":
+            target_dir = arguments.get("target_dir", ".agents/wiki")
+            from graph_memory.core.knowledge import extract_knowledge_cards
+            res = extract_knowledge_cards(actual_db_path, target_dir)
+            return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
+
+        elif name == "reflect_session_memory":
+            target_dir = arguments.get("target_dir", ".agents")
+            from graph_memory.core.memory import reflect_session_memory
+            res = reflect_session_memory(actual_db_path, target_dir)
             return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
 
         else:

@@ -2,6 +2,13 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v3.3.0] - 2026-08-16
+- **Automated Repo Wiki Generator (`graph_memory/core/knowledge.py`)**: Generates hierarchical Markdown documentation trees under `.agents/wiki/codebase/` with exact Qoder frontmatter schemas (`layout_version`, `module_id`, `source_files`), structured sections, and relation graphs.
+- **Domain Knowledge Card Extractor**: Classifies codebase facts into 8 standardized software knowledge domains (`frontend_style`, `backend_architecture`, `build_system`, `logging_system`, `configuration_system`, `dependency_management`, `error_handling`, `external_dependency`).
+- **Session Memory Reflection Engine (`graph_memory/core/memory.py`)**: Analyzes decision ledger history and active facts to reflect learnings into 5 persistent memory categories under `.agents/memories/`.
+- **4 New MCP Tools**: Added `generate_repo_wiki`, `get_knowledge_cards`, `reflect_session_memory`, and `search_repo_wiki` to the MCP Server.
+- **New CLI Commands**: `graph-memory wiki generate`, `graph-memory knowledge extract`, `graph-memory memory reflect`.
+
 ## [v3.2.4] - 2026-08-08
 - **AST Ingestion Scoping Isolation**: Implemented `should_ignore_path` in `graph_memory/core/ingest.py` to strictly exclude third-party dependencies, virtual environments (`venv`, `.venv`, `env`, `site-packages`), `node_modules`, `dist`, `build`, `target`, and cache directories from AST graph ingestion.
 - **Stale Graph Memory Correction**: Updated Package node `epistemic-graph-memory` metadata in active project database to reflect `v3.2.4` global PyPI release state.

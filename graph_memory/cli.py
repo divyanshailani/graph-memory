@@ -97,6 +97,20 @@ def main():
     snapshot_parser.add_argument("--max-tokens", type=int, default=600, help="Max tokens limit budget (default: 600)")
     snapshot_parser.add_argument("--min-trust", type=float, default=0.7, help="Minimum effective trust threshold (default: 0.7)")
 
+    # Wiki
+    wiki_parser = subparsers.add_parser("wiki", help="Generate hierarchical Markdown Repo Wiki matching Qoder schema")
+    wiki_parser.add_argument("--target-dir", type=str, default=".agents/wiki", help="Target directory for wiki output (default: .agents/wiki)")
+    wiki_parser.add_argument("--repo", type=str, default="Project", help="Repository name")
+    wiki_parser.add_argument("--branch", type=str, default="main", help="Branch name")
+
+    # Knowledge
+    knowledge_parser = subparsers.add_parser("knowledge", help="Extract domain Knowledge Cards across 8 software domains")
+    knowledge_parser.add_argument("--target-dir", type=str, default=".agents/wiki", help="Target directory for knowledge cards (default: .agents/wiki)")
+
+    # Memory Reflect
+    memory_parser = subparsers.add_parser("memory", help="Reflect session history and decision ledger into persistent memory cards")
+    memory_parser.add_argument("--target-dir", type=str, default=".agents", help="Target directory for memories (default: .agents)")
+
     # Search Sessions
     search_sessions_parser = subparsers.add_parser("search-sessions", help="Search historical session conversation logs using FTS5")
     search_sessions_parser.add_argument("query", help="Search query string")
@@ -203,6 +217,21 @@ def main():
             from graph_memory.core.snapshot import generate_active_snapshot
             snap = generate_active_snapshot(db_path, max_tokens=args.max_tokens, min_trust=args.min_trust)
             print(snap)
+
+        elif args.command == "wiki":
+            from graph_memory.core.knowledge import generate_repo_wiki
+            res = generate_repo_wiki(db_path, args.target_dir, repo_name=args.repo, branch=args.branch)
+            print(json.dumps(res, indent=2))
+
+        elif args.command == "knowledge":
+            from graph_memory.core.knowledge import extract_knowledge_cards
+            res = extract_knowledge_cards(db_path, args.target_dir)
+            print(json.dumps(res, indent=2))
+
+        elif args.command == "memory":
+            from graph_memory.core.memory import reflect_session_memory
+            res = reflect_session_memory(db_path, args.target_dir)
+            print(json.dumps(res, indent=2))
 
         elif args.command == "search-sessions":
             res = engine.search_session_logs(db_path, args.query, session_id=args.session_id, limit=args.limit)
