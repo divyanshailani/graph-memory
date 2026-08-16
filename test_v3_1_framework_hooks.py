@@ -5,13 +5,11 @@ from graph_memory.integrations import framework_hooks
 
 def test_framework_hook_status():
     status = framework_hooks.get_hook_status()
-    assert len(status) == 5
+    assert len(status) == 9
     frameworks = [s["framework"] for s in status]
-    assert "antigravity" in frameworks
-    assert "claude-code" in frameworks
-    assert "claude-desktop" in frameworks
-    assert "codex" in frameworks
-    assert "hermes" in frameworks
+    for fw in ("antigravity", "claude-code", "claude-desktop", "codex", "hermes",
+               "zcode", "cursor", "qoder", "opencode"):
+        assert fw in frameworks
     for s in status:
         assert s["os_platform"] == sys.platform
 

@@ -119,8 +119,10 @@ def main():
 
     # Hook
     hook_parser = subparsers.add_parser("hook", help="Manage optional framework-native auto-memory bindings")
-    hook_parser.add_argument("action", choices=["install", "uninstall", "status"], help="Action: install, uninstall, or status")
-    hook_parser.add_argument("--framework", choices=["antigravity", "claude-code", "claude-desktop", "codex", "hermes", "all"], default="all", help="Target framework (default: all)")
+    hook_parser.add_argument("action", choices=["install", "uninstall", "status", "refresh"], help="Action: install, uninstall, status, or refresh")
+    hook_parser.add_argument("--framework", choices=["antigravity", "claude-code", "claude-desktop", "codex", "hermes", "zcode", "cursor", "qoder", "opencode", "all"], default="all", help="Target framework (default: all)")
+
+    hook_event_parser = subparsers.add_parser("hook-event", help="Internal: dispatch a harness lifecycle hook payload from stdin (PostToolUse/Stop/SessionStart)")
 
     args = parser.parse_args()
     
@@ -245,9 +247,16 @@ def main():
             elif args.action == "uninstall":
                 res = framework_hooks.uninstall_hooks(target_framework=args.framework)
                 print(json.dumps(res, indent=2))
+            elif args.action == "refresh":
+                res = framework_hooks.refresh_installed_snapshots(db_path=db_path)
+                print(json.dumps({"refreshed": res}, indent=2))
             elif args.action == "status":
                 res = framework_hooks.get_hook_status()
                 print(json.dumps(res, indent=2))
+
+        elif args.command == "hook-event":
+            from graph_memory.core import lifecycle
+            lifecycle.main()
 
         elif args.command == "merge":
             res = engine.merge_nodes(db_path, args.source_id, args.target_id)

@@ -68,6 +68,39 @@ To use Epistemic Graph Memory natively inside Claude Desktop, Cursor, Antigravit
 
 ---
 
+## 🪝 Framework Auto-Memory Bindings & Lifecycle Hooks (v3.5.0)
+
+One command wires Graph Memory into your agent harness — with **automatic lifecycle capture** where the harness supports event hooks, and an MCP + instruction protocol everywhere else:
+
+```bash
+graph-memory hook install                # all frameworks
+graph-memory hook install --framework zcode
+graph-memory hook status
+graph-memory hook refresh                # re-render snapshots now
+```
+
+| Framework | Integration | What happens automatically |
+| :--- | :--- | :--- |
+| **Claude Code** | Event hooks in `~/.claude/settings.json` + auto-context file | PostToolUse → incremental AST ingest of edited files; Stop → transcript distillation into Session_Logs + fact graph; SessionStart → snapshot refresh |
+| **ZCode** | Event hooks in `~/.zcode/cli/config.json` (`hooks.enabled: true`) | Same three-event lifecycle via portable `process` hooks |
+| **Codex** | Rule file + MCP entry in `~/.codex/config.toml` | Snapshot injection + lifecycle protocol; MCP tools for search/ingest/distill |
+| **Cursor** | Rule (`.mdc`) + MCP entry in `~/.cursor/mcp.json` | Snapshot injection + lifecycle protocol via MCP tools |
+| **Antigravity** | Skill file (`AUTO_MEMORY.md`) | Snapshot injection + lifecycle protocol |
+| **Qoder** | Rule file (`~/.qoder/rules/`) | Snapshot injection + lifecycle protocol |
+| **OpenCode** | Marked section in `AGENTS.md` | Snapshot injection + lifecycle protocol (HTTP/SSE MCP transport required for native tools) |
+| **Hermes** | `MEMORY.md` auto-sync section | Snapshot sync on install/refresh |
+| **Claude Desktop** | Env flag on the MCP entry | `GRAPH_MEMORY_AUTO_SNAPSHOT=1` |
+
+The lifecycle is powered by a **harness-agnostic dispatcher** — any harness that can run a shell command on events can use it:
+
+```bash
+echo '{"hook_event_name": "PostToolUse", "tool_name": "Write", "tool_input": {"file_path": "src/main.py"}}' | graph-memory hook-event
+```
+
+Events handled: `PostToolUse` (auto-ingest edited file, <5ms), `Stop`/`SessionEnd` (log transcript tail into FTS5 Session_Logs, distill facts, refresh snapshots), `SessionStart` (refresh all installed snapshot files).
+
+---
+
 ## 🚀 Quickstart
 
 ### 1. Ingest Codebase AST & Build Graph

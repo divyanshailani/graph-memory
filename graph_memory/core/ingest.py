@@ -5,7 +5,7 @@ import json
 import importlib
 import hashlib
 from pathlib import Path
-from graph_memory.core.engine import get_or_create_node, create_relation as add_relation, get_connection, write_transaction, resolve_canonical_id, now_iso
+from graph_memory.core.engine import get_or_create_node, create_relation as add_relation, get_connection, write_transaction, resolve_canonical_id, now_iso, init_db
 
 def add_node(db_path, *args, **kwargs):
     """
@@ -335,6 +335,7 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
     Soft-deletes ghost component nodes before re-parsing.
     Enforces 10MB size cap and null-byte binary file checks.
     """
+    init_db(db_path)
     path = Path(file_path).resolve()
     if not path.is_file():
         return {"status": "error", "message": f"File '{file_path}' not found."}
@@ -464,6 +465,7 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
 
 def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter", rationale: str = "Full project AST ingestion"):
     """Scans the directory, parses files, and builds the MOC graph with call graphs and inheritance."""
+    init_db(db_path)
     directory = Path(directory).resolve()
     ns = project_namespace(directory)
     print(f"[*] Starting AST ingestion of {directory} (namespace: {ns})")
