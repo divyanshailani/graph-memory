@@ -1,4 +1,0 @@
-assets
-dist
-graph_memory
-tests

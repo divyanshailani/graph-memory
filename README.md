@@ -1,60 +1,70 @@
-# Epistemic Graph Memory (v3.7.0)
+<p align="center">
+  <img src="assets/screenshot2.png" width="720" alt="2D graph visualization of a Python codebase">
+</p>
 
-![Epistemic Graph Memory 2D UI Global View](assets/screenshot2.png)
+<h1 align="center">Epistemic Graph Memory</h1>
 
-A universal, long-term project memory and structural context tool for AI coding agents (Antigravity, Hermes, Claude, Cursor, Codex, ZCode, Qoder, OpenCode, Ollama).
+<p align="center">
+  A local knowledge graph that gives AI coding agents long-term project memory.<br>
+  5,000 lines of Python. Zero cloud dependencies. One <code>pip install</code>.
+</p>
 
-**Epistemic Graph Memory** provides a local, SQLite-backed knowledge graph with **Dynamic Epistemic Trust Decay**, **First-Class Decision Audit Ledgers**, **Contradiction Detection**, **Codebase AST Call-Graph Awareness** (cross-file), **Automated Lifecycle Hooks**, and **Continuous Micro-Compaction**.
+<p align="center">
+  <code>pip install epistemic-graph-memory[all]</code>
+</p>
 
-Exposed via the **Model Context Protocol (MCP)** — stdio and **streamable HTTP** — plus a 25-command CLI. Installs itself into 9 agent harnesses with one command.
-
----
-
-## 🌟 Core Features
-
-### 1. 🪝 Automated Lifecycle Memory (v3.5.0)
-* **Harness-Agnostic Hook Dispatcher (`graph-memory hook-event`)**: `PostToolUse` → incremental AST ingest of edited files (<5ms); `Stop` → transcript captured into FTS5 Session_Logs + facts distilled into the graph; `SessionStart` → every installed snapshot file refreshed.
-* **9 Framework Integrations**: real event hooks for Claude Code and ZCode; MCP registration + lifecycle protocol for Cursor, Codex, and OpenCode; instruction/snapshot files for Antigravity, Qoder, and Hermes. `graph-memory hook install` — idempotent, non-destructive.
-
-### 2. ⏳ Dynamic Epistemic Trust Decay & Contradiction Detection
-* **Cognitive Forgetting Math**: query-time trust decay — `Effective = Base × 0.5^(Δdays/30)` — without mutating baseline data. Re-verification restores 100%.
-* **Contradiction Detection (v3.7.0)**: when different agents assert different values for the same fact, the conflict is recorded and surfaced as `⚠ Conflicting Assertions` in snapshots — disagreements become visible instead of silently overwriting.
-* **Stale-Node GC (`graph-memory prune`)**: soft-deletes decayed, unreferenced nodes past a staleness threshold.
-
-### 3. 📜 First-Class Multi-Agent Decision Ledger
-* **Append-Only Audit Trail**: tracks *which* agent made *what* decision, *why*, and *when* — mechanical AST re-parses are kept out (signal, not noise).
-* **Real Reflection Engine (v3.7.0)**: `graph-memory memory reflect` digests the last 30 days of actual decisions into 5 standardized memory categories — real rationales, not templates.
-
-### 4. 🔍 Codebase AST & Cross-File Call Graphs
-* **Polyglot AST Ingestion** (`ingest-code`): Python, TypeScript/TSX, JavaScript/JSX, Go, Rust via Tree-sitter — signatures, docstrings, line bounds, snippets.
-* **Cross-File Call Resolution (v3.7.0)**: CALLS edges are resolved to definitions across file boundaries (unique-name matching within the project namespace).
-* **Batch Ingestion (v3.7.0)**: one connection + one transaction per file — full-repo ingestion is ~17× faster; **hash-skip** makes unchanged re-ingestion near-instant (8.5s → 0.06s on this repo).
-* **Trigram Identifier Search (v3.7.0)**: partial identifiers like `effective_tr` match exactly — the default tokenizer can't do that.
-* **<5ms Single-File Re-Parsing (`ingest-file`)** with `--root` monorepo-safe namespace pinning.
-
-### 5. 🧠 Hermes-Class Snapshots & Micro-Compaction
-* **Prompt-Cache-Stable Snapshots**: deterministic ordering + content fingerprinting — an unchanged graph returns the byte-identical snapshot, keeping agent prompt caches intact.
-* **Continuous Micro-Compaction (`distill_session`)**: verbatim user intent preserved; assistant tool output distilled into structured graph facts.
-* **Episodic Session Logging & FTS5 Search** (`search-sessions`), auto-populated by lifecycle hooks.
-
-### 6. 🔀 Entity Merging, Hygiene & Visualization
-* **Soft-Delete Merging** with canonical pointers and alias tracking; orphan linting; project-root-safe sweeps.
-* **2D & GPU-accelerated 3D visualizations** (`export_html`, `export-3d`).
+<p align="center">
+  <a href="https://pypi.org/project/epistemic-graph-memory/"><img src="https://img.shields.io/pypi/v/epistemic-graph-memory?color=blue" alt="PyPI"></a>
+  <a href="https://github.com/divyanshailani/graph-memory/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <img src="https://img.shields.io/badge/tests-57%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/Python-3.10+-blue" alt="Python">
+</p>
 
 ---
 
-## 📦 Installation
+### The problem
+
+AI coding agents reconstruct project context from scratch every session. They re-read files they've already read, re-derive architecture they've already derived, and lose decisions made yesterday. Claude Code, Cursor, Codex, OpenCode — they all forget.
+
+### The solution
+
+A **SQLite-backed knowledge graph** that lives in your project at `.agents/graph_memory.sqlite`. It ingests your codebase's AST (functions, classes, call graphs, imports), records agent decisions in an append-only ledger, detects when agents contradict each other, and produces deterministic snapshots that inject directly into agent system prompts — with byte-stable caching so prompt caches stay hot.
+
+All 12 MCP tools, a 25-command CLI, lifecycle hooks for 9 agent harnesses, and a streamable HTTP endpoint for remote agents.
+
+---
+
+## What it actually does
+
+**Code understanding.** Parses Python, TypeScript, JS/JSX, Go, and Rust via Tree-sitter. Extracts signatures, docstrings, line ranges, call graphs, and inheritance. Cross-file call resolution wires stubs to real definitions across your entire repo. Batch ingestion processes this repo's 37 files in 0.45 seconds; unchanged re-ingests take 0.06 seconds (hash-skip).
+
+**Agent memory.** Every decision an agent makes — what it changed, why, when — goes into an append-only `Decision_Ledger`. A reflection engine digests the last 30 days of real decisions into structured memory cards. When two agents disagree about a fact (different values for the same field), the contradiction is recorded and surfaced — no silent overwrites.
+
+**Trust decay.** Facts decay over time with `effective = base × 0.5^(days/30)`. Re-verifying a fact resets it to 100%. Stale, unreferenced nodes get garbage-collected. This means the graph self-maintains — old assumptions fade, recent verifications stay sharp.
+
+**Prompt injection.** `graph-memory snapshot` produces a deterministic, content-fingerprinted Markdown snapshot. If nothing changed, you get the exact same bytes — so Claude's prompt cache, Cursor's context cache, whatever — stays warm. Zero wasted tokens on unchanged context.
+
+**Transport.** Runs over stdio MCP (Claude Desktop, Cursor, Codex) and streamable HTTP MCP (OpenCode, Docker, remote agents). One binary, both transports. Health check at `/health`.
+
+**Import / export.** Migrating from mem0? `graph-memory import-mem0 export.json`. Have a CLAUDE.md? `graph-memory import-md CLAUDE.md`. Want a browsable Obsidian vault with `[[wikilinks]]` for every graph edge? `graph-memory export-obsidian ~/vault`.
+
+---
+
+## Setup
 
 ```bash
 pip install epistemic-graph-memory[all]
 ```
-*Note: The `[all]` extra installs polyglot Tree-sitter AST parser bindings.*
 
----
+The `[all]` extra installs Tree-sitter parsers for all 6 languages plus the HTTP transport (uvicorn + starlette). If you only need Python:
 
-## 🔌 MCP Server Configuration
+```bash
+pip install epistemic-graph-memory
+```
 
-To use Epistemic Graph Memory natively inside Claude Desktop, Cursor, Antigravity, Hermes, or Codex, add the following to your MCP configuration:
+### MCP configuration
+
+Add to your agent's MCP config:
 
 ```json
 {
@@ -66,150 +76,129 @@ To use Epistemic Graph Memory natively inside Claude Desktop, Cursor, Antigravit
 }
 ```
 
-### Streamable HTTP Transport (v3.6.0)
-
-For harnesses that only support remote MCP servers (OpenCode) or remotely hosted / Dockerized agents:
+For remote-only agents (OpenCode, Docker):
 
 ```bash
-graph-memory-mcp-http                     # http://127.0.0.1:8765/mcp
-GRAPH_MEMORY_HTTP_HOST=0.0.0.0 GRAPH_MEMORY_HTTP_PORT=9000 graph-memory-mcp-http
+graph-memory-mcp-http                    # http://127.0.0.1:8765/mcp
 ```
 
-Stateless session mode — safe for multiple concurrent agents on one endpoint. Health check at `/health`. Requires the `http` extra (`pip install epistemic-graph-memory[http]`).
+Then point your agent at `http://127.0.0.1:8765/mcp`.
 
----
-
-## 📥 Memory Import & Export (v3.6.0)
-
-Zero-cost migration from the memory formats you already have, and a browsable vault out:
+### One-command agent hooks
 
 ```bash
-# Import CLAUDE.md / AGENTS.md / .cursorrules / any markdown memory (sections -> Knowledge_Nodes)
-graph-memory import-md CLAUDE.md
-graph-memory import-md .cursorrules
-
-# Import a mem0 JSON export (records -> Fact_Nodes)
-graph-memory import-mem0 mem0_export.json
-
-# Export curated knowledge as an Obsidian vault with [[wikilinks]] for graph edges
-graph-memory export-obsidian ~/vaults/graph-memory
-```
-
----
-
-## 🪝 Framework Auto-Memory Bindings & Lifecycle Hooks (v3.5.0)
-
-One command wires Graph Memory into your agent harness — with **automatic lifecycle capture** where the harness supports event hooks, and an MCP + instruction protocol everywhere else:
-
-```bash
-graph-memory hook install                # all frameworks
-graph-memory hook install --framework zcode
+graph-memory hook install                 # auto-detect and configure all frameworks
+graph-memory hook install --framework cursor
 graph-memory hook status
-graph-memory hook refresh                # re-render snapshots now
 ```
 
-| Framework | Integration | What happens automatically |
-| :--- | :--- | :--- |
-| **Claude Code** | Event hooks in `~/.claude/settings.json` + auto-context file | PostToolUse → incremental AST ingest of edited files; Stop → transcript distillation into Session_Logs + fact graph; SessionStart → snapshot refresh |
-| **ZCode** | Event hooks in `~/.zcode/cli/config.json` (`hooks.enabled: true`) | Same three-event lifecycle via portable `process` hooks |
-| **Codex** | Rule file + MCP entry in `~/.codex/config.toml` | Snapshot injection + lifecycle protocol; MCP tools for search/ingest/distill |
-| **Cursor** | Rule (`.mdc`) + MCP entry in `~/.cursor/mcp.json` | Snapshot injection + lifecycle protocol via MCP tools |
-| **Antigravity** | Skill file (`AUTO_MEMORY.md`) | Snapshot injection + lifecycle protocol |
-| **Qoder** | Rule file (`~/.qoder/rules/`) | Snapshot injection + lifecycle protocol |
-| **OpenCode** | Marked section in `AGENTS.md` + remote MCP entry in `opencode.json` | Snapshot injection + lifecycle protocol + native MCP tools via `graph-memory-mcp-http` |
-| **Hermes** | `MEMORY.md` auto-sync section | Snapshot sync on install/refresh |
-| **Claude Desktop** | Env flag on the MCP entry | `GRAPH_MEMORY_AUTO_SNAPSHOT=1` |
-
-The lifecycle is powered by a **harness-agnostic dispatcher** — any harness that can run a shell command on events can use it:
-
-```bash
-echo '{"hook_event_name": "PostToolUse", "tool_name": "Write", "tool_input": {"file_path": "src/main.py"}}' | graph-memory hook-event
-```
-
-Events handled: `PostToolUse` (auto-ingest edited file, <5ms), `Stop`/`SessionEnd` (log transcript tail into FTS5 Session_Logs, distill facts, refresh snapshots), `SessionStart` (refresh all installed snapshot files).
+This wires lifecycle capture into Claude Code, ZCode, Cursor, Codex, OpenCode, Antigravity, Qoder, and Hermes — PostToolUse triggers incremental AST ingest of edited files (<5ms), session-end distills transcripts into graph facts, and session-start refreshes all snapshots.
 
 ---
 
-## 🚀 Quickstart
+## CLI
 
-### 1. Ingest Codebase AST & Build Graph
 ```bash
-# Parse full codebase AST, call graphs, and inheritance
+# Ingest entire codebase (polyglot AST + call graphs)
 graph-memory ingest-code .
 
-# Incrementally re-parse a single modified file (<5ms)
-graph-memory ingest-file graph_memory/core/engine.py --agent Antigravity --rationale "Refactored trust decay"
-```
+# Re-parse a single changed file (<5ms, skips if unchanged)
+graph-memory ingest-file src/engine.py
 
-### 2. Generate Active Prompt Snapshot (Hermes Auto-Recall)
-```bash
-# Output prompt-cache friendly Markdown snapshot for system prompt injection
+# Generate prompt-cache-stable snapshot
 graph-memory snapshot --max-tokens 600 --min-trust 0.7
+
+# Search nodes (FTS5 + identifier substring fallback)
+graph-memory search "effective_tr"
+graph-memory search "trust decay"
+
+# Decision audit trail
+graph-memory query-history --agent Hermes --days 7
+
+# Contradiction detection
+graph-memory contradictions
+
+# Stale-node garbage collection
+graph-memory prune --days 60
+
+# Import existing memories
+graph-memory import-md CLAUDE.md
+graph-memory import-mem0 memories.json
+
+# Export to Obsidian vault
+graph-memory export-obsidian ~/vaults/my-project
+
+# HTML / 3D visualization
+graph-memory export-html graph.html
+graph-memory export-3d graph_3d.html
 ```
 
-### 3. Query Decision History & Search
-```bash
-# Query agent decision audit ledger
-graph-memory query-history --agent Hermes --limit 10
+---
 
-# FTS5 search across graph nodes
-graph-memory search "effective trust"
+## MCP tools
 
-# FTS5 search across episodic session logs
-graph-memory search-sessions "tree-sitter fallback"
+| Tool | What it does |
+|---|---|
+| `get_active_snapshot` | Deterministic, cache-stable Markdown snapshot of high-trust graph state |
+| `distill_session` | Micro-compaction: distills raw transcript turns into structured graph facts |
+| `search_session_history` | FTS5 search across episodic session logs |
+| `query_decision_history` | Append-only decision ledger (who changed what, why, when) |
+| `search_nodes` | FTS5 + substring search across nodes |
+| `read_code_snippet` | AST-derived signature, docstring, line bounds, source snippet |
+| `ingest_file` | Incremental single-file AST re-parse (<5ms, hash-skip) |
+| `create_entities` | Create graph nodes with trust scores |
+| `create_relations` | Create directed edges between nodes |
+| `merge_entities` | Merge entities with canonical pointer redirect |
+| `open_nodes` | Serialize subgraphs around specific nodes |
+| `read_graph` | Serialize the complete knowledge graph |
+
+---
+
+## Architecture
+
+```
+graph_memory/
+├── core/
+│   ├── engine.py        # SQLite graph engine: CRUD, trust decay, ledger, search, batch upsert, contradictions, prune
+│   ├── ingest.py        # Tree-sitter AST ingestion, batch pipeline, cross-file call resolution
+│   ├── importers.py     # Markdown + mem0 import
+│   ├── obsidian.py      # Obsidian vault export with [[wikilinks]]
+│   ├── snapshot.py      # Deterministic, cache-stable snapshot generation
+│   ├── memory.py        # Data-driven reflection engine
+│   ├── lifecycle.py      # Harness-agnostic event dispatcher
+│   ├── distill.py       # Session transcript micro-compaction
+│   └── knowledge.py     # LLM-powered MOC summarization
+├── mcp/
+│   ├── server.py        # Stdio MCP server (12 tools)
+│   └── http_server.py   # Streamable HTTP MCP transport
+├── integrations/
+│   └── framework_hooks.py  # 9-framework auto-install + lifecycle wiring
+└── cli.py               # 25-command CLI
 ```
 
-### 4. Graph Maintenance & 3D Visualization
-```bash
-# Lint for orphan nodes and dangling edges
-graph-memory lint --fix
+**Storage**: Single SQLite file per project at `.agents/graph_memory.sqlite`. WAL mode for concurrent safety. FTS5 for full-text search. No external databases, no servers, no cloud.
 
-# Perform SQLite database vacuum
-graph-memory consolidate
+**Node types**: `Fact_Node` (deterministic ground truth from AST/Git), `Knowledge_Node` (architecture, design decisions), `Episode_Node` (completed task sequences), `Release_Node` (published versions).
 
-# Export WebGL 3D GPU-Accelerated Graph Viewer
-graph-memory export-3d memory_3d.html
-```
+**Trust model**: Query-time decay — `effective = base × 0.5^(Δdays/half_life)`. Re-verification resets to 100%. Stale, unreferenced nodes get soft-deleted by the prune command.
 
 ---
 
-## 🛠️ MCP Tool Reference
+## Numbers
 
-| MCP Tool | Description |
-| :--- | :--- |
-| `get_active_snapshot` | Returns prompt-cache friendly Markdown snapshot of active high-trust graph facts. |
-| `distill_session` | Performs continuous micro-compaction and fact distillation on session turns. |
-| `search_session_history` | Searches historical conversation transcripts using SQLite FTS5. |
-| `query_decision_history` | Queries global `Decision_Ledger` by agent, node ID, or timeframe. |
-| `read_code_snippet` | Retrieves exact AST signature, docstring, line bounds, and source code snippet. |
-| `ingest_file` | Incrementally re-parses a single changed file into the AST graph (<5ms). |
-| `merge_entities` | Merges source entity into target entity with canonical pointer redirect. |
-| `create_entities` | Creates multiple entities with trust scores and observation payloads. |
-| `create_relations` | Creates directional relations between entities with trust metrics. |
-| `search_nodes` | FTS5 search across entity names, types, and observation content. |
-| `open_nodes` | Serializes subgraphs around specific central nodes. |
-| `read_graph` | Serializes complete knowledge graph. |
+| Metric | Value |
+|---|---|
+| Source code | 5,066 lines Python |
+| Test code | 1,672 lines, 57 tests |
+| MCP tools | 12 |
+| CLI commands | 25 |
+| Agent harnesses | 9 |
+| AST languages | 6 (Python, TS, TSX, JS, JSX, Go, Rust) |
+| Dependencies | 4 runtime (mcp, tree-sitter + 2 parsers) |
+| External services | 0 |
 
 ---
 
-## 💡 Architecture Protocols
+## License
 
-### Entity Ontologies
-- **`Fact_Node`**: Ground-truth facts derived deterministically from AST, Git, or session distillation.
-- **`Knowledge_Node`**: High-level architecture, module summaries, and design decisions.
-- **`Episode_Node`**: Workflows, completed task sequences, and milestone records (linked with `FOLLOWED_BY` edges).
-- **`Release_Node`**: Formally published software versions and package release records.
-
----
-
-## 📜 Lineage & Acknowledgments
-
-Graph-Memory was inspired by the [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf) and the **Hermes Agent** memory architecture.
-
-* **SQLite WAL & FTS5**: Powered by local SQLite WAL mode for concurrent multi-agent safety and FTS5 for high-speed indexing.
-* **Tree-Sitter**: Powered by Tree-sitter for polyglot AST parsing.
-
----
-
-## 📄 License
-MIT License. Created by Divyansh Ailani.
+MIT — [Divyansh Ailani](https://github.com/divyanshailani)

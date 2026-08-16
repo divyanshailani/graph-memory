@@ -241,7 +241,7 @@ wheels = [
 
 [[package]]
 name = "epistemic-graph-memory"
-version = "3.3.0"
+version = "3.7.1"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -253,14 +253,20 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
+    { name = "starlette" },
     { name = "tree-sitter-go" },
     { name = "tree-sitter-javascript" },
     { name = "tree-sitter-python" },
     { name = "tree-sitter-rust" },
     { name = "tree-sitter-typescript" },
+    { name = "uvicorn" },
 ]
 go = [
     { name = "tree-sitter-go" },
+]
+http = [
+    { name = "starlette" },
+    { name = "uvicorn" },
 ]
 javascript = [
     { name = "tree-sitter-javascript" },
@@ -278,6 +284,8 @@ typescript = [
 [package.metadata]
 requires-dist = [
     { name = "mcp", specifier = ">=1.1.2" },
+    { name = "starlette", marker = "extra == 'all'", specifier = ">=0.27.0" },
+    { name = "starlette", marker = "extra == 'http'", specifier = ">=0.27.0" },
     { name = "tree-sitter", specifier = ">=0.22.0" },
     { name = "tree-sitter-go", marker = "extra == 'all'" },
     { name = "tree-sitter-go", marker = "extra == 'go'" },
@@ -292,8 +300,10 @@ requires-dist = [
     { name = "tree-sitter-typescript", specifier = ">=0.23.2" },
     { name = "tree-sitter-typescript", marker = "extra == 'all'" },
     { name = "tree-sitter-typescript", marker = "extra == 'typescript'" },
+    { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.23.0" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.23.0" },
 ]
-provides-extras = ["python", "typescript", "javascript", "go", "rust", "all"]
+provides-extras = ["python", "typescript", "javascript", "go", "rust", "http", "all"]
 
 [[package]]
 name = "exceptiongroup"

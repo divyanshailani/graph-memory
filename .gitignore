@@ -1,8 +1,27 @@
-.agents/
+# Python
 __pycache__/
-*.sqlite
-.venv/
-.pytest_cache/
-dist/
+*.py[cod]
 *.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+
+# Database files (per-project, not tracked)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# IDE / OS
 .DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test cache
+.pytest_cache/
+
+# Agent-local state
+.agents/

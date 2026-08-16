@@ -1,84 +1,113 @@
 ---
 name: graph-memory
-description: Local SQLite graph structure for project state tracking. Provides commands to manage nodes and relationships natively.
+description: Local SQLite knowledge graph for AI agent project memory. Ingests codebase AST, tracks agent decisions, detects contradictions, and produces cache-stable prompt snapshots. Install via pip, use via CLI or MCP.
 ---
 
-# Graph Memory (Trust-Weighted)
+# Graph Memory
 
-A local SQLite graph database for tracking project context, architecture, and state. 
-Isolated per-project at `.agents/graph_memory.sqlite`. Do not use flat markdown files for tracking state.
+A local SQLite knowledge graph at `.agents/graph_memory.sqlite` that gives AI coding agents long-term project memory. Ingests codebase AST (Python, TypeScript, Go, Rust via Tree-sitter), tracks agent decisions in an append-only ledger, detects contradictions between agents, and produces prompt-cache-stable snapshots.
 
-## CLI Usage (`graph-memory`)
+## Installation
 
-### 1. Data Modification (Requires `--trust` flag)
-Trust scores:
-- **1.0**: Verified hard facts (terminal exits, explicit human confirmation).
-- **0.6 - 0.8**: Assumptions, unverified plans, AI claims.
+```bash
+pip install epistemic-graph-memory[all]
+```
 
-**Add Node:**
-`graph-memory add_node <id> <type> [attributes_json] --trust <score> --method <human|llm> --link-to <parent_id> --link-type <relation>`
-*Example:* `graph-memory add_node "Postgres_DB" "Fact_Node" '{"ip": "192.168.1.5", "created_by": "Antigravity", "source": "AST", "confidence": 1.0}' --trust 1.0 --method human --link-to "Project_Graph_Memory" --link-type "PART_OF"`
+## MCP Server
 
-**Add Relationship:**
-`graph-memory add_relation <source_id> <relation_type> <target_id> [attributes_json] --trust <score> --method <human|llm>`
-*Example:* `graph-memory add_relation "Server_VM" "HAS_DB" "Postgres_DB" '{"verified_by": "pytest", "confidence": 0.9}' --trust 1.0 --method human`
+```json
+{"mcpServers":{"graph-memory":{"command":"graph-memory-mcp"}}}
+```
 
-### 2. Querying
-**Get Node Neighborhood:**
-`graph-memory get_node <id> --min-trust <score>`
+Streamable HTTP (for OpenCode, Docker, remote agents):
 
-**Full-Text Search:**
-`graph-memory search <query> --min-trust <score>`
+```bash
+graph-memory-mcp-http    # http://127.0.0.1:8765/mcp
+```
 
-### 3. AST Ingestion
-**Parse Codebase AST:**
-`graph-memory ingest-code .`
-Generates structural AST nodes for the current directory.
+## CLI
 
-**Generate Summaries (Requires `GEMINI_API_KEY`):**
-`graph-memory summarize-mocs`
-Uses LLM to summarize ingested structural hubs.
+### Ingest
 
-### 4. Code-Aware AST Ingestion, Call Graphs & Two-Way Sync
-### 5. Epistemic Truth Decay & Global Decision Ledger (v2.1.0)
-**Dynamic Query-Time Decay:**
-- Computes time-decayed effective trust score dynamically based on elapsed time since `last_verified_at`:
-  $$\text{Effective Trust} = \text{Base Trust Score} \times \left(0.5^{\frac{\Delta t_{\text{days}}}{30.0}}\right)$$
-- Any node re-verification (`add_observation`, `ingest_file`, `add_node`) resets `last_verified_at = now()`, restoring effective trust to 100%.
+```bash
+graph-memory ingest-code .                    # full codebase AST + call graphs
+graph-memory ingest-file src/engine.py        # single file re-parse (<5ms)
+```
 
-**Global Multi-Agent Decision Ledger Query:**
-`graph-memory query-history [--agent AGENT_NAME] [--node-id NODE_ID] [--days DAYS] [--limit N]`
-Queries decisions across all nodes globally in a dedicated SQLite `Decision_Ledger` table.
-*MCP Tool:* `query_decision_history(agentName, node_id, days, limit)`
+### Snapshots
 
-### 5. Hygiene & Maintenance
-**Graph Health Linting:**
-`graph-memory lint [--fix]`
-Checks for orphan nodes and dangling edges, optionally repairing them.
+```bash
+graph-memory snapshot --max-tokens 600 --min-trust 0.7
+```
 
-**Entity Merging:**
-`graph-memory merge <source_id> <target_id>`
-Safely merges a source node into a target node, consolidating observations/metadata, rewiring edges, and setting up automatic alias redirection.
+Output is deterministic and content-fingerprinted — unchanged graph returns identical bytes so prompt caches stay warm.
 
-**Database Consolidation ("Dreaming"):**
-`graph-memory consolidate`
-Cleans dangling relations and reclaims SQLite disk space via incremental vacuum.
+### Search
 
-### 5. Visualization
-**HTML Export:**
-`graph-memory export_html .agents/graph_memory_vis.html`
+```bash
+graph-memory search "effective_tr"            # FTS5 + identifier substring fallback
+graph-memory search-sessions "trust decay"    # episodic session logs
+```
 
-**3D Interactive Export:**
-`graph-memory export-3d .agents/graph_3d.html`
+### Decision History
 
-## Graph Modeling Best Practices
-1. **Link New Nodes:** Always use `--link-to` when calling `add_node` to prevent orphaned nodes.
-2. **Standard Types (Strict Ontology):** 
-   - `Fact_Node`: Deterministic ground-truth (AST, Git, filesystem).
-   - `Knowledge_Node`: Architecture, Design decisions, LLM summaries.
-   - `Episode_Node`: Completed execution workflows/tasks.
-3. **Advanced Protocol (JSON):** Always inject `created_by`, `source`, `confidence`, and `verification_source` into `[attributes_json]`.
-4. **Standard Relations:** `IMPLEMENTS`, `DEPENDS_ON`, `FIXES`, `PART_OF`, `FOLLOWED_BY` (for Episodes).
-4. **Deduplication:** Check node existence before creation.
-5. **Garbage Collection:** Run `graph-memory sweep --root <Main_Project_Node>` to remove orphaned nodes.
-6. **Active Filtering:** Query with `--min-trust 0.6` to exclude low-trust data.
+```bash
+graph-memory query-history --agent Hermes --days 7
+graph-memory contradictions                   # surfaced conflicts between agents
+```
+
+### Lifecycle Hooks
+
+```bash
+graph-memory hook install                     # auto-configure all 9 frameworks
+graph-memory hook install --framework cursor
+graph-memory hook status
+graph-memory hook refresh                     # re-render snapshots now
+```
+
+Supported: Claude Code, ZCode, Cursor, Codex, OpenCode, Antigravity, Qoder, Hermes, Claude Desktop.
+
+Events: PostToolUse (incremental AST ingest <5ms), Stop (transcript distillation + fact extraction), SessionStart (snapshot refresh).
+
+### Import / Export
+
+```bash
+graph-memory import-md CLAUDE.md              # markdown sections → Knowledge_Nodes
+graph-memory import-mem0 memories.json        # mem0 JSON → Fact_Nodes
+graph-memory export-obsidian ~/vault           # Obsidian vault with [[wikilinks]]
+```
+
+### Maintenance
+
+```bash
+graph-memory prune --days 60                  # soft-delete stale, unreferenced nodes
+graph-memory lint --fix                       # orphan/dangling edge cleanup
+graph-memory consolidate                       # SQLite vacuum
+graph-memory merge <source_id> <target_id>    # entity merge with alias redirect
+```
+
+### Visualization
+
+```bash
+graph-memory export-html graph.html
+graph-memory export-3d graph_3d.html
+```
+
+## Node Types
+
+- **Fact_Node**: Ground-truth from AST, Git, filesystem, or session distillation.
+- **Knowledge_Node**: Architecture, module summaries, design decisions.
+- **Episode_Node**: Completed task sequences (linked with FOLLOWED_BY).
+- **Release_Node**: Published software versions.
+
+## Trust Model
+
+Query-time decay: `effective = base × 0.5^(Δdays/30)`. Re-verification (ingest, add_observation) resets to 100%. Stale unreferenced nodes get soft-deleted by `prune`.
+
+## Graph Best Practices
+
+1. **Link new nodes** with `--link-to` to prevent orphans.
+2. **Use the standard ontology**: Fact_Node, Knowledge_Node, Episode_Node, Release_Node.
+3. **Inject metadata** in attributes JSON: `created_by`, `source`, `confidence`, `verification_source`.
+4. **Standard relations**: IMPLEMENTS, DEPENDS_ON, CALLS, DEFINED_IN, EXTENDS, FIXES, PART_OF, FOLLOWED_BY.
+5. **Query with `--min-trust 0.6`** to exclude low-confidence data.

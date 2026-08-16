@@ -4,17 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "epistemic-graph-memory"
-version = "3.7.0"
+version = "3.7.1"
 authors = [
   { name="Divyansh Ailani" },
 ]
-description = "A universal, long-term project memory tool utilizing a local SQLite graph structure for AI agents."
+description = "Local SQLite knowledge graph for AI coding agent memory — AST ingestion, trust decay, decision ledgers, contradiction detection, prompt-stable snapshots."
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["ai", "agent-memory", "knowledge-graph", "mcp", "sqlite", "tree-sitter", "code-intelligence"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
     "mcp>=1.1.2",
@@ -40,6 +44,11 @@ all = [
     "uvicorn>=0.23.0",
     "starlette>=0.27.0"
 ]
+
+[project.urls]
+Homepage = "https://github.com/divyanshailani/graph-memory"
+Repository = "https://github.com/divyanshailani/graph-memory"
+Changelog = "https://github.com/divyanshailani/graph-memory/blob/main/CHANGELOG.md"
 
 [project.scripts]
 graph-memory = "graph_memory.cli:main"
