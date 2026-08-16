@@ -328,12 +328,14 @@ def sanitize_import_module(module: str, ext: str):
     clean = clean.strip(";").strip()
     return clean or None
 
-def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", rationale: str = "Single file incremental AST update") -> dict:
+def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", rationale: str = "Single file incremental AST update", root: str = None) -> dict:
     """
     Incrementally re-parses a single changed file into the AST graph (<5ms).
     Updates component nodes, line ranges, signatures, docstrings, snippets, CALLS, and EXTENDS relations.
     Soft-deletes ghost component nodes before re-parsing.
     Enforces 10MB size cap and null-byte binary file checks.
+    Pass `root` to pin the project namespace explicitly (monorepo-safe); by default
+    the enclosing project root is detected via marker files.
     """
     init_db(db_path)
     path = Path(file_path).resolve()
@@ -363,7 +365,7 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
     extract_entities(tree.root_node, ext, entities, content)
     extract_calls_and_inheritance(tree.root_node, ext, entities, "", content)
     
-    project_root = _find_project_root(path)
+    project_root = Path(root).resolve() if root else _find_project_root(path)
     ns = project_namespace(project_root)
     try:
         rel_posix = path.relative_to(project_root).as_posix()
@@ -474,11 +476,14 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
         
     return {"status": "success", "file": str(path), "functions": len(entities["functions"]), "classes": len(entities["classes"]), "calls": len(entities["calls"]), "extends": len(entities["extends"])}
 
-def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter", rationale: str = "Full project AST ingestion"):
-    """Scans the directory, parses files, and builds the MOC graph with call graphs and inheritance."""
+def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter", rationale: str = "Full project AST ingestion", root: str = None):
+    """Scans the directory, parses files, and builds the MOC graph with call graphs and inheritance.
+    Pass `root` to pin the project namespace explicitly (monorepo-safe: guarantees
+    ingest-code and ingest-file derive identical IDs even with nested project markers)."""
     init_db(db_path)
     directory = Path(directory).resolve()
-    ns = project_namespace(directory)
+    ns_base = Path(root).resolve() if root else directory
+    ns = project_namespace(ns_base)
     print(f"[*] Starting AST ingestion of {directory} (namespace: {ns})")
     
     parsers = {}
@@ -513,9 +518,14 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
             print(f"[!] Failed to read {path.name}: {e}")
             continue
 
-        rel_parent = path.parent.relative_to(directory)
-        rel_dir = rel_parent.as_posix()
-        rel_posix = path.relative_to(directory).as_posix()
+        # Paths are keyed to the namespace root (monorepo-safe): ingest-code and
+        # ingest_file derive identical IDs for the same file.
+        try:
+            rel_posix = path.relative_to(ns_base).as_posix()
+            rel_dir = path.parent.relative_to(ns_base).as_posix()
+        except ValueError:
+            rel_posix = path.relative_to(directory).as_posix()
+            rel_dir = path.parent.relative_to(directory).as_posix()
         file_id = f"File_{ns}/{rel_posix}"
 
         # Hash-skip: unchanged files skip parser loading, parsing, and all upserts.

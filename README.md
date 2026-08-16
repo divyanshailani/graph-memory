@@ -66,6 +66,35 @@ To use Epistemic Graph Memory natively inside Claude Desktop, Cursor, Antigravit
 }
 ```
 
+### Streamable HTTP Transport (v3.6.0)
+
+For harnesses that only support remote MCP servers (OpenCode) or remotely hosted / Dockerized agents:
+
+```bash
+graph-memory-mcp-http                     # http://127.0.0.1:8765/mcp
+GRAPH_MEMORY_HTTP_HOST=0.0.0.0 GRAPH_MEMORY_HTTP_PORT=9000 graph-memory-mcp-http
+```
+
+Stateless session mode — safe for multiple concurrent agents on one endpoint. Health check at `/health`. Requires the `http` extra (`pip install epistemic-graph-memory[http]`).
+
+---
+
+## 📥 Memory Import & Export (v3.6.0)
+
+Zero-cost migration from the memory formats you already have, and a browsable vault out:
+
+```bash
+# Import CLAUDE.md / AGENTS.md / .cursorrules / any markdown memory (sections -> Knowledge_Nodes)
+graph-memory import-md CLAUDE.md
+graph-memory import-md .cursorrules
+
+# Import a mem0 JSON export (records -> Fact_Nodes)
+graph-memory import-mem0 mem0_export.json
+
+# Export curated knowledge as an Obsidian vault with [[wikilinks]] for graph edges
+graph-memory export-obsidian ~/vaults/graph-memory
+```
+
 ---
 
 ## 🪝 Framework Auto-Memory Bindings & Lifecycle Hooks (v3.5.0)
@@ -87,7 +116,7 @@ graph-memory hook refresh                # re-render snapshots now
 | **Cursor** | Rule (`.mdc`) + MCP entry in `~/.cursor/mcp.json` | Snapshot injection + lifecycle protocol via MCP tools |
 | **Antigravity** | Skill file (`AUTO_MEMORY.md`) | Snapshot injection + lifecycle protocol |
 | **Qoder** | Rule file (`~/.qoder/rules/`) | Snapshot injection + lifecycle protocol |
-| **OpenCode** | Marked section in `AGENTS.md` | Snapshot injection + lifecycle protocol (HTTP/SSE MCP transport required for native tools) |
+| **OpenCode** | Marked section in `AGENTS.md` + remote MCP entry in `opencode.json` | Snapshot injection + lifecycle protocol + native MCP tools via `graph-memory-mcp-http` |
 | **Hermes** | `MEMORY.md` auto-sync section | Snapshot sync on install/refresh |
 | **Claude Desktop** | Env flag on the MCP entry | `GRAPH_MEMORY_AUTO_SNAPSHOT=1` |
 

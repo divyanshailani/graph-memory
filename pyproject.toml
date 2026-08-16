@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "epistemic-graph-memory"
-version = "3.5.1"
+version = "3.6.0"
 authors = [
   { name="Divyansh Ailani" },
 ]
@@ -30,17 +30,21 @@ typescript = ["tree-sitter-typescript"]
 javascript = ["tree-sitter-javascript"]
 go = ["tree-sitter-go"]
 rust = ["tree-sitter-rust"]
+http = ["uvicorn>=0.23.0", "starlette>=0.27.0"]
 all = [
     "tree-sitter-python",
     "tree-sitter-typescript",
     "tree-sitter-javascript",
     "tree-sitter-go",
-    "tree-sitter-rust"
+    "tree-sitter-rust",
+    "uvicorn>=0.23.0",
+    "starlette>=0.27.0"
 ]
 
 [project.scripts]
 graph-memory = "graph_memory.cli:main"
 graph-memory-mcp = "graph_memory.mcp.server:main"
+graph-memory-mcp-http = "graph_memory.mcp.http_server:main"
 [tool.setuptools.packages.find]
 where = ["."]
 

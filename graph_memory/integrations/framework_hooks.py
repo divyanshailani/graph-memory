@@ -81,6 +81,7 @@ QODER_RULE_FILE = os.path.join(HOME, ".qoder", "rules", "graph-memory-auto.md")
 
 OPENCODE_CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config"))
 OPENCODE_AGENTS_FILE = os.path.join(OPENCODE_CONFIG_HOME, "opencode", "AGENTS.md")
+OPENCODE_CONFIG_PATH = os.path.join(OPENCODE_CONFIG_HOME, "opencode", "opencode.json")
 OPENCODE_SECTION_START = "<!-- graph-memory:auto:start -->"
 OPENCODE_SECTION_END = "<!-- graph-memory:auto:end -->"
 
@@ -186,9 +187,9 @@ def _render_opencode(snapshot):
 {snapshot}
 
 {LIFECYCLE_INSTRUCTIONS}
-> Auto-managed by `graph-memory hook install --framework opencode`. OpenCode currently
-> requires remote HTTP/SSE MCP servers, so run `graph-memory-mcp` behind an HTTP
-> transport (or use the CLI: `graph-memory snapshot`, `graph-memory ingest-file`).
+> Auto-managed by `graph-memory hook install --framework opencode`. A remote MCP entry
+> (`graph-memory` -> http://127.0.0.1:8765/mcp) is registered in opencode.json — start it
+> with `graph-memory-mcp-http` for native tool access, or use the CLI equivalents.
 {OPENCODE_SECTION_END}"""
 
 # ---------------------------------------------------------------------------
@@ -611,20 +612,53 @@ def uninstall_qoder_hook():
             return False, f"Failed removing Qoder rule: {str(e)}"
     return False, "Qoder rule was not installed."
 
+def install_opencode_mcp():
+    """Registers the graph-memory HTTP MCP server in opencode.json (remote transport)."""
+    def mutate(data):
+        mcp = data.get("mcp", {})
+        mcp["graph-memory"] = {
+            "type": "remote",
+            "url": os.environ.get("GRAPH_MEMORY_HTTP_URL", "http://127.0.0.1:8765/mcp"),
+            "enabled": True,
+        }
+        data["mcp"] = mcp
+
+    _merge_json_config(OPENCODE_CONFIG_PATH, mutate)
+    return f"Registered graph-memory remote MCP server in {OPENCODE_CONFIG_PATH} (run graph-memory-mcp-http)"
+
+def uninstall_opencode_mcp():
+    if not os.path.exists(OPENCODE_CONFIG_PATH):
+        return False, "No opencode.json found."
+
+    def mutate(data):
+        data.get("mcp", {}).pop("graph-memory", None)
+
+    _merge_json_config(OPENCODE_CONFIG_PATH, mutate)
+    return True, f"Removed graph-memory MCP server from {OPENCODE_CONFIG_PATH}"
+
 def install_opencode_hook(db_path=None):
     try:
         actual_db = db_path or get_db_path()
         snapshot = generate_active_snapshot(actual_db, max_tokens=600, min_trust=0.7)
         _write_marked_section(OPENCODE_AGENTS_FILE, _render_opencode(snapshot))
-        return True, f"Installed graph-memory auto section into {OPENCODE_AGENTS_FILE}"
+        mcp_msg = install_opencode_mcp()
+        return True, f"Installed graph-memory auto section into {OPENCODE_AGENTS_FILE}; {mcp_msg}"
     except Exception as e:
         return False, f"Failed installing OpenCode hook: {str(e)}"
 
 def uninstall_opencode_hook():
+    removed = []
     try:
-        return _remove_marked_section(OPENCODE_AGENTS_FILE)
+        ok, msg = _remove_marked_section(OPENCODE_AGENTS_FILE)
+        removed.append(msg)
     except Exception as e:
         return False, f"Failed removing OpenCode section: {str(e)}"
+    try:
+        ok, msg = uninstall_opencode_mcp()
+        removed.append(msg)
+    except Exception as e:
+        return False, f"Failed removing OpenCode MCP entry: {str(e)}"
+    return (True if removed else False), "; ".join(removed)
 
 # ---------------------------------------------------------------------------
 # Dispatcher & Snapshot Refresh

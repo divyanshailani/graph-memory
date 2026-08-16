@@ -242,7 +242,8 @@ async def handle_list_tools() -> list[types.Tool]:
                     "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
                     "file_path": {"type": "string", "description": "Absolute or relative path to the modified file on disk."},
                     "agentName": {"type": "string", "description": "Name of the agent triggering the update (e.g. Hermes, Antigravity, Claude)."},
-                    "rationale": {"type": "string", "description": "Reason for updating or refactoring this file."}
+                    "rationale": {"type": "string", "description": "Reason for updating or refactoring this file."},
+                    "root": {"type": "string", "description": "Explicit project namespace root (monorepo-safe); must match ingest-code --root for identical node IDs."}
                 },
                 "required": ["file_path"]
             }
@@ -461,8 +462,9 @@ async def handle_call_tool(
             file_path = arguments.get("file_path", "")
             agent_name = arguments.get("agentName", "MCP-Agent")
             rationale = arguments.get("rationale", "Incremental file AST ingest")
+            root = arguments.get("root")
             from graph_memory.core.ingest import ingest_file
-            res = ingest_file(actual_db_path, file_path, agent_name=agent_name, rationale=rationale)
+            res = ingest_file(actual_db_path, file_path, agent_name=agent_name, rationale=rationale, root=root)
             return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
 
         elif name == "query_decision_history":

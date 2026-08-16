@@ -60,6 +60,7 @@ def main():
     # Ingest Code
     ingest_parser = subparsers.add_parser("ingest-code", help="Parse AST of a codebase and build structural MOC graph")
     ingest_parser.add_argument("directory", help="Directory containing code to ingest")
+    ingest_parser.add_argument("--root", type=str, default=None, help="Explicit project namespace root (monorepo-safe; IDs keyed to this path)")
     
     # Summarize MOCs
     summarize_parser = subparsers.add_parser("summarize-mocs", help="Auto-generates semantic summaries for all MOCs")
@@ -84,6 +85,17 @@ def main():
     ingest_file_parser.add_argument("file_path", type=str, help="Path to modified file")
     ingest_file_parser.add_argument("--agent", type=str, default="CLI-Agent", help="Agent name")
     ingest_file_parser.add_argument("--rationale", type=str, default="CLI file update", help="Reason for file modification")
+    ingest_file_parser.add_argument("--root", type=str, default=None, help="Explicit project namespace root (must match ingest-code --root for identical IDs)")
+
+    # Importers (v3.6.0)
+    import_md_parser = subparsers.add_parser("import-md", help="Import a markdown memory file (CLAUDE.md, AGENTS.md, .cursorrules, any .md) into the graph")
+    import_md_parser.add_argument("path", type=str, help="Markdown file or directory of .md files to import")
+
+    import_mem0_parser = subparsers.add_parser("import-mem0", help="Import a mem0 JSON export into the graph")
+    import_mem0_parser.add_argument("path", type=str, help="Path to mem0 JSON export")
+
+    export_obsidian_parser = subparsers.add_parser("export-obsidian", help="Export curated knowledge as an Obsidian vault with [[wikilinks]]")
+    export_obsidian_parser.add_argument("vault_dir", type=str, help="Target directory for the Obsidian vault")
 
     # Query Decision History
     query_history_parser = subparsers.add_parser("query-history", help="Query global Decision Ledger across all nodes")
@@ -192,7 +204,8 @@ def main():
 
         elif args.command == "ingest-code":
             from graph_memory.core.ingest import ingest_codebase
-            ingest_codebase(db_path, args.directory)
+            res = ingest_codebase(db_path, args.directory, root=args.root)
+            print(json.dumps(res, indent=2))
 
         elif args.command == "summarize-mocs":
             from graph_memory.core.summarizer import generate_moc_summaries
@@ -208,7 +221,26 @@ def main():
 
         elif args.command == "ingest-file":
             from graph_memory.core.ingest import ingest_file
-            res = ingest_file(db_path, args.file_path, agent_name=args.agent, rationale=args.rationale)
+            res = ingest_file(db_path, args.file_path, agent_name=args.agent, rationale=args.rationale, root=args.root)
+            print(json.dumps(res, indent=2))
+
+        elif args.command == "import-md":
+            from graph_memory.core.importers import import_markdown_file
+            if os.path.isdir(args.path):
+                md_files = glob.glob(os.path.join(args.path, "**/*.md"), recursive=True) + glob.glob(os.path.join(args.path, ".cursorrules"))
+                results = [import_markdown_file(db_path, f) for f in sorted(set(md_files))]
+            else:
+                results = [import_markdown_file(db_path, args.path)]
+            print(json.dumps(results, indent=2))
+
+        elif args.command == "import-mem0":
+            from graph_memory.core.importers import import_mem0
+            res = import_mem0(db_path, args.path)
+            print(json.dumps(res, indent=2))
+
+        elif args.command == "export-obsidian":
+            from graph_memory.core.obsidian import export_obsidian_vault
+            res = export_obsidian_vault(db_path, args.vault_dir)
             print(json.dumps(res, indent=2))
 
         elif args.command == "query-history":
