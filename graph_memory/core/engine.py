@@ -326,6 +326,7 @@ def search_nodes(db_path: str, query: str, min_trust: float = 0.6, half_life_day
     """
     Full-Text Search across the graph using FTS5. Excludes soft-deleted nodes and those below effective trust threshold.
     Calculates time-decayed effective trust score dynamically based on last_verified_at.
+    Access-count bumps for all matched nodes are batched into a single write transaction.
     """
     init_db(db_path)
     with get_connection(db_path) as conn:
@@ -339,6 +340,7 @@ def search_nodes(db_path: str, query: str, min_trust: float = 0.6, half_life_day
         """, (query,))
         
         results = []
+        matched_ids = []
         for row in cursor.fetchall():
             node_id, label, props_json, status, base_trust, last_verified_at = row
             eff_trust = calculate_effective_trust(base_trust or 1.0, last_verified_at, half_life_days)
@@ -354,19 +356,25 @@ def search_nodes(db_path: str, query: str, min_trust: float = 0.6, half_life_day
                 "status": status,
                 "effective_trust": eff_trust
             })
+            matched_ids.append(node_id)
             
-            # Update access count to prevent memory decay
-            with write_transaction(conn):
-                conn.execute("""
-                    UPDATE Nodes 
-                    SET access_count = access_count + 1, updated_at = ? 
-                    WHERE id = ?
-                """, (now_iso(), node_id))
-                
             if len(results) >= 20:
                 break
                 
+        # Batched read-feedback: one write transaction for the whole result set
+        # instead of one transaction per row (prevents write amplification on the read path).
+        if matched_ids:
+            placeholders = ",".join("?" * len(matched_ids))
+            with write_transaction(conn):
+                conn.execute(f"""
+                    UPDATE Nodes 
+                    SET access_count = access_count + 1, updated_at = ? 
+                    WHERE id IN ({placeholders})
+                """, (now_iso(), *matched_ids))
+                
         return results
+
+MAX_NODE_HISTORY = 10  # retained entries per node; older mechanical entries are pruned on upsert
 
 def get_or_create_node(
     db_path: str, 
@@ -379,11 +387,16 @@ def get_or_create_node(
     link_type: str = "PART_OF",
     agent_name: str = "Tree-sitter",
     rationale: str = None,
-    design_intent: str = None
+    design_intent: str = None,
+    log_ledger: bool = True
 ) -> str:
     """
     Creates a node, or returns an existing one to prevent fragmentation.
     Implements agent provenance attribution and decision history tracking.
+    History is capped at MAX_NODE_HISTORY entries and consecutive identical entries are
+    collapsed, so repeated mechanical re-verifications never grow the JSON payload.
+    Set log_ledger=False for deterministic bulk operations (e.g. AST re-parsing) that
+    are not agent decisions — provenance for those still lives in node properties.
     """
     init_db(db_path)
     node_id = resolve_canonical_id(db_path, node_id)
@@ -413,7 +426,16 @@ def get_or_create_node(
             if row:
                 existing_props = json.loads(row[1]) if row[1] else {}
                 hist = existing_props.get("history", [])
-                hist.append(history_entry)
+                last = hist[-1] if hist else None
+                is_repeat = (
+                    last
+                    and last.get("agent") == history_entry["agent"]
+                    and last.get("action") == history_entry["action"]
+                    and last.get("rationale") == history_entry["rationale"]
+                )
+                if not is_repeat:
+                    hist.append(history_entry)
+                existing_props["history"] = hist[-MAX_NODE_HISTORY:]
                 
                 existing_obs = existing_props.get("observations", [])
                 new_obs = props.get("observations", [])
@@ -421,7 +443,6 @@ def get_or_create_node(
                 
                 existing_props.update(props)
                 existing_props["observations"] = combined_obs
-                existing_props["history"] = hist
                 
                 conn.execute("""
                     UPDATE Nodes 
@@ -451,10 +472,11 @@ def get_or_create_node(
                         trust_score = MAX(trust_score, excluded.trust_score)
                 """, (node_id, link_to, link_type, now_iso(), now_iso(), trust_score, verification_method))
             
-            conn.execute("""
-                INSERT INTO Decision_Ledger (node_id, agent_name, action, rationale, timestamp)
-                VALUES (?, ?, ?, ?, ?)
-            """, (node_id, agent_name or "System", "upsert_node", rationale or "Node created or updated", now_iso()))
+            if log_ledger:
+                conn.execute("""
+                    INSERT INTO Decision_Ledger (node_id, agent_name, action, rationale, timestamp)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (node_id, agent_name or "System", "upsert_node", rationale or "Node created or updated", now_iso()))
             
             return node_id
 

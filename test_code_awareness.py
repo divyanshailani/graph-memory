@@ -2,11 +2,13 @@ import os
 import sqlite3
 import json
 import time
+from pathlib import Path
 from graph_memory.core import engine
 from graph_memory.core import ingest
 
 TEST_DB = "test_code_awareness.sqlite"
 SAMPLE_FILE = "sample_target.py"
+NS = ingest.project_namespace(Path(".").resolve())
 
 def setup_env():
     for f in [TEST_DB, f"{TEST_DB}-wal", f"{TEST_DB}-shm", SAMPLE_FILE]:
@@ -46,7 +48,7 @@ def test_ast_rich_extraction():
         ingest.ingest_codebase(TEST_DB, ".")
         
         # Test function node extraction
-        func_id = f"Func_calculate_total_{SAMPLE_FILE}"
+        func_id = f"Func_calculate_total_{NS}/{SAMPLE_FILE}"
         subgraph = engine.serialize_subgraph(TEST_DB, func_id)
         assert "calculate_total" in subgraph
         assert "Calculates total price including tax." in subgraph
@@ -107,7 +109,7 @@ def new_discounted_price(price: float, discount: float) -> float:
         # Trigger single-file ingest or auto-sync
         ingest.ingest_file(TEST_DB, SAMPLE_FILE, agent_name="Hermes", rationale="Added discount function")
         
-        new_func_id = f"Func_new_discounted_price_{SAMPLE_FILE}"
+        new_func_id = f"Func_new_discounted_price_{NS}/{SAMPLE_FILE}"
         subgraph = engine.serialize_subgraph(TEST_DB, new_func_id)
         assert "new_discounted_price" in subgraph
         assert "New function added by Hermes." in subgraph

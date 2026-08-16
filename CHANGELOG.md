@@ -2,6 +2,18 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v3.4.1] - 2026-08-16
+- **Decision Ledger Signal Isolation**: `get_or_create_node` now accepts `log_ledger` (default `True`). AST ingestion upserts pass `log_ledger=False` — deterministic re-parsing is not an agent decision, so a full `ingest-code` run no longer floods the `Decision_Ledger` with thousands of "Node created or updated" rows. Agent/MCP/CLI-driven upserts, observations, and merges continue to be audited; AST provenance still lands in node `history` and properties.
+- **Bounded Node History**: Node `history` arrays are capped at `MAX_NODE_HISTORY` (10) entries and consecutive identical entries (same agent, action, rationale) are collapsed, so repeated re-ingestion of an unchanged file no longer grows the properties JSON payload.
+- **Batched Search Write-Feedback**: `search_nodes` now bumps `access_count` for all matched nodes in a single write transaction instead of one transaction per result row, removing write amplification from the read path.
+- **Regression Tests**: Added `test_v3_4_1_write_amplification.py` covering ledger-free ingestion, agent-decision auditing, history cap/dedupe, and batched access-count feedback.
+
+## [v3.4.0] - 2026-08-16
+- **Project-Scoped Node Identity Scheme**: Node IDs are now namespaced by project root (`<name>_<6-char path hash>`) and keyed by repo-relative POSIX paths (`File_<ns>/graph_memory/core/engine.py`, `Func_load_<ns>/a/utils.py`, `MOC_<ns>/graph_memory/core`, `Dependency_<ns>/<module>`). Fixes two classes of silent node collision in the legacy basename-only scheme: identical basenames in different directories (`a/utils.py` vs `b/utils.py`) and identical relative paths across projects sharing one database.
+- **Import Sanitization (`sanitize_import_module`)**: Relative Python imports (`from . import x`, `from ...pkg import y`) and relative JS/TS paths (`./x`, `../y`) no longer produce `External_Dependency` nodes; leading dots are stripped from valid relative module paths, eliminating junk nodes like `Dependency_.` and `Dependency_...transformers.models`.
+- **Root Detection for `ingest-file` (`_find_project_root`)**: Single-file incremental ingestion now resolves the enclosing project root via marker files (`.git`, `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`) so `ingest-file` and `ingest-code` derive identical node IDs for the same file. File and Component nodes now store consistent relative `file_path`, plus `abs_path` and `project_root` provenance properties.
+- **Regression Tests**: Added `test_v3_4_id_namespacing.py` covering same-basename collisions, cross-project collisions, `ingest-file`/`ingest-code` identity agreement, and import sanitization.
+
 ## [v3.3.0] - 2026-08-16
 - **Automated Repo Wiki Generator (`graph_memory/core/knowledge.py`)**: Generates hierarchical Markdown documentation trees under `.agents/wiki/codebase/` with exact Qoder frontmatter schemas (`layout_version`, `module_id`, `source_files`), structured sections, and relation graphs.
 - **Domain Knowledge Card Extractor**: Classifies codebase facts into 8 standardized software knowledge domains (`frontend_style`, `backend_architecture`, `build_system`, `logging_system`, `configuration_system`, `dependency_management`, `error_handling`, `external_dependency`).

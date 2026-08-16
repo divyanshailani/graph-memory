@@ -1,10 +1,20 @@
 import os
+import re
 import sys
 import json
 import importlib
 import hashlib
 from pathlib import Path
-from graph_memory.core.engine import get_or_create_node as add_node, create_relation as add_relation, get_connection, write_transaction, resolve_canonical_id, now_iso
+from graph_memory.core.engine import get_or_create_node, create_relation as add_relation, get_connection, write_transaction, resolve_canonical_id, now_iso
+
+def add_node(db_path, *args, **kwargs):
+    """
+    AST ingestion wrapper around engine.get_or_create_node.
+    Mechanical re-verifications are not agent decisions, so they are kept out of the
+    Decision_Ledger (log_ledger=False); provenance still lands in node properties/history.
+    """
+    kwargs.setdefault("log_ledger", False)
+    return get_or_create_node(db_path, *args, **kwargs)
 
 def pre_sweep_file_imports(db_path: str, file_node_id: str):
     """Deletes existing imports for a file before a fresh AST scan to prevent Ghost Edges."""
@@ -276,6 +286,48 @@ def should_ignore_path(path: Path) -> bool:
             return True
     return False
 
+# ---------------------------------------------------------------------------
+# Project-Scoped Node Identity (v3.4.0)
+#
+# Node IDs are namespaced by project root ("<name>_<6-char path hash>") and
+# keyed by repo-relative POSIX paths. This prevents two classes of collision
+# when a single database serves multiple checkouts: identical basenames in
+# different directories (two utils.py files) and identical relative paths in
+# different projects (two repos both containing src/utils.py).
+# ---------------------------------------------------------------------------
+
+PROJECT_ROOT_MARKERS = (".git", "pyproject.toml", "setup.py", "package.json", "go.mod", "Cargo.toml")
+
+def _find_project_root(start: Path) -> Path:
+    """Nearest ancestor of `start` containing a project marker file. Falls back to the starting directory."""
+    current = start if start.is_dir() else start.parent
+    for candidate in [current, *current.parents]:
+        if any((candidate / marker).exists() for marker in PROJECT_ROOT_MARKERS):
+            return candidate
+    return current
+
+def project_namespace(root: Path) -> str:
+    """Stable per-project namespace: sanitized root name + 6-char hash of the resolved absolute path."""
+    digest = hashlib.sha1(str(Path(root).resolve()).encode("utf-8")).hexdigest()[:6]
+    clean_name = re.sub(r"[^A-Za-z0-9]", "_", Path(root).name).strip("_") or "project"
+    return f"{clean_name}_{digest}"
+
+def sanitize_import_module(module: str, ext: str):
+    """
+    Cleans a raw import string into a dependency module name, or returns None for
+    targets that must not become External_Dependency nodes: relative Python imports
+    (`from . import x`, `from ...pkg import y`) and relative JS/TS paths (`./x`, `../y`).
+    """
+    if not module:
+        return None
+    clean = module.strip().strip("'\"").strip()
+    if ext == ".py":
+        clean = clean.lstrip(".")
+    if not clean or clean.startswith((".", "/", "\\")):
+        return None
+    clean = clean.strip(";").strip()
+    return clean or None
+
 def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", rationale: str = "Single file incremental AST update") -> dict:
     """
     Incrementally re-parses a single changed file into the AST graph (<5ms).
@@ -310,7 +362,14 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
     extract_entities(tree.root_node, ext, entities, content)
     extract_calls_and_inheritance(tree.root_node, ext, entities, "", content)
     
-    file_id = f"File_{path.name}"
+    project_root = _find_project_root(path)
+    ns = project_namespace(project_root)
+    try:
+        rel_posix = path.relative_to(project_root).as_posix()
+    except ValueError:
+        rel_posix = path.name
+
+    file_id = f"File_{ns}/{rel_posix}"
     pre_sweep_file_components(db_path, file_id)
     
     file_hash = hashlib.sha256(content).hexdigest()
@@ -322,7 +381,9 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
         "Fact_Node", 
         {
             "entity_type": "File", 
-            "path": str(path), 
+            "path": rel_posix, 
+            "abs_path": str(path),
+            "project_root": str(project_root),
             "file_hash": file_hash, 
             "mtime": mtime,
             "source": "AST"
@@ -335,7 +396,7 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
     
     for cls_data in entities["classes"]:
         cls_name = cls_data["name"]
-        comp_id = f"Class_{cls_name}_{path.name}"
+        comp_id = f"Class_{cls_name}_{ns}/{rel_posix}"
         add_node(
             db_path,
             comp_id,
@@ -349,7 +410,7 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
                 "start_line": cls_data["start_line"],
                 "end_line": cls_data["end_line"],
                 "snippet": cls_data["snippet"],
-                "file_path": str(path),
+                "file_path": rel_posix,
                 "source": "AST"
             },
             trust_score=1.0,
@@ -362,7 +423,7 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
         
     for func_data in entities["functions"]:
         func_name = func_data["name"]
-        comp_id = f"Func_{func_name}_{path.name}"
+        comp_id = f"Func_{func_name}_{ns}/{rel_posix}"
         add_node(
             db_path,
             comp_id,
@@ -376,7 +437,7 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
                 "start_line": func_data["start_line"],
                 "end_line": func_data["end_line"],
                 "snippet": func_data["snippet"],
-                "file_path": str(path),
+                "file_path": rel_posix,
                 "source": "AST"
             },
             trust_score=1.0,
@@ -388,14 +449,14 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
         )
         
     for ext_data in entities["extends"]:
-        sub_cls = f"Class_{ext_data['sub_class']}_{path.name}"
-        super_cls = f"Class_{ext_data['super_class']}_{path.name}"
+        sub_cls = f"Class_{ext_data['sub_class']}_{ns}/{rel_posix}"
+        super_cls = f"Class_{ext_data['super_class']}_{ns}/{rel_posix}"
         add_node(db_path, super_cls, "Fact_Node", {"entity_type": "Component", "name": ext_data['super_class'], "component_type": "class", "source": "AST_Inheritance"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
         add_relation(db_path, sub_cls, super_cls, "EXTENDS", trust_score=1.0, verification_method="source_parse")
         
     for call_data in entities["calls"]:
-        caller_id = f"Func_{call_data['caller']}_{path.name}"
-        callee_id = f"Func_{call_data['callee']}_{path.name}"
+        caller_id = f"Func_{call_data['caller']}_{ns}/{rel_posix}"
+        callee_id = f"Func_{call_data['callee']}_{ns}/{rel_posix}"
         add_node(db_path, callee_id, "Fact_Node", {"entity_type": "Component", "name": call_data['callee'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
         add_relation(db_path, caller_id, callee_id, "CALLS", trust_score=1.0, verification_method="source_parse")
         
@@ -404,10 +465,11 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
 def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter", rationale: str = "Full project AST ingestion"):
     """Scans the directory, parses files, and builds the MOC graph with call graphs and inheritance."""
     directory = Path(directory).resolve()
-    print(f"[*] Starting AST ingestion of {directory}")
+    ns = project_namespace(directory)
+    print(f"[*] Starting AST ingestion of {directory} (namespace: {ns})")
     
     parsers = {}
-    root_id = f"Project_{directory.name}"
+    root_id = f"Project_{ns}"
     add_node(db_path, root_id, "Fact_Node", {"entity_type": "Project", "path": str(directory), "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
     
     created_mocs = set()
@@ -449,12 +511,14 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
         extract_calls_and_inheritance(tree.root_node, ext, entities, "", content)
         
         rel_parent = path.parent.relative_to(directory)
-        moc_id = f"MOC_{rel_parent.name}" if rel_parent.name else f"MOC_{directory.name}"
+        rel_dir = rel_parent.as_posix()
+        rel_posix = path.relative_to(directory).as_posix()
+        moc_id = f"MOC_{ns}" if rel_dir in (".", "") else f"MOC_{ns}/{rel_dir}"
         if moc_id not in created_mocs:
-            add_node(db_path, moc_id, "Fact_Node", {"entity_type": "MOC_Hub", "dir": str(rel_parent), "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=root_id, link_type="PART_OF", agent_name=agent_name, rationale=rationale)
+            add_node(db_path, moc_id, "Fact_Node", {"entity_type": "MOC_Hub", "dir": rel_dir, "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=root_id, link_type="PART_OF", agent_name=agent_name, rationale=rationale)
             created_mocs.add(moc_id)
             
-        file_id = f"File_{path.name}"
+        file_id = f"File_{ns}/{rel_posix}"
         pre_sweep_file_components(db_path, file_id)
         
         file_hash = hashlib.sha256(content).hexdigest()
@@ -466,7 +530,9 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
             "Fact_Node", 
             {
                 "entity_type": "File", 
-                "path": str(path.relative_to(directory)), 
+                "path": rel_posix,
+                "abs_path": str(path),
+                "project_root": str(directory),
                 "file_hash": file_hash,
                 "mtime": mtime,
                 "created_by": agent_name, 
@@ -483,7 +549,7 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
         
         for cls_data in entities["classes"]:
             cls_name = cls_data["name"]
-            comp_id = f"Class_{cls_name}_{path.name}"
+            comp_id = f"Class_{cls_name}_{ns}/{rel_posix}"
             add_node(
                 db_path, 
                 comp_id, 
@@ -497,7 +563,7 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
                     "start_line": cls_data["start_line"],
                     "end_line": cls_data["end_line"],
                     "snippet": cls_data["snippet"],
-                    "file_path": str(path.relative_to(directory)),
+                    "file_path": rel_posix,
                     "created_by": agent_name, 
                     "source": "AST", 
                     "confidence": 1.0
@@ -512,7 +578,7 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
             
         for func_data in entities["functions"]:
             func_name = func_data["name"]
-            comp_id = f"Func_{func_name}_{path.name}"
+            comp_id = f"Func_{func_name}_{ns}/{rel_posix}"
             add_node(
                 db_path, 
                 comp_id, 
@@ -526,7 +592,7 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
                     "start_line": func_data["start_line"],
                     "end_line": func_data["end_line"],
                     "snippet": func_data["snippet"],
-                    "file_path": str(path.relative_to(directory)),
+                    "file_path": rel_posix,
                     "created_by": agent_name, 
                     "source": "AST", 
                     "confidence": 1.0
@@ -540,23 +606,25 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
             )
             
         for ext_data in entities["extends"]:
-            sub_cls = f"Class_{ext_data['sub_class']}_{path.name}"
-            super_cls = f"Class_{ext_data['super_class']}_{path.name}"
+            sub_cls = f"Class_{ext_data['sub_class']}_{ns}/{rel_posix}"
+            super_cls = f"Class_{ext_data['super_class']}_{ns}/{rel_posix}"
             add_node(db_path, sub_cls, "Fact_Node", {"entity_type": "Component", "name": ext_data['sub_class'], "component_type": "class", "source": "AST_Inheritance"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
             add_node(db_path, super_cls, "Fact_Node", {"entity_type": "Component", "name": ext_data['super_class'], "component_type": "class", "source": "AST_Inheritance"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
             add_relation(db_path, sub_cls, super_cls, "EXTENDS", trust_score=1.0, verification_method="source_parse")
             
         for call_data in entities["calls"]:
-            caller_id = f"Func_{call_data['caller']}_{path.name}"
-            callee_id = f"Func_{call_data['callee']}_{path.name}"
+            caller_id = f"Func_{call_data['caller']}_{ns}/{rel_posix}"
+            callee_id = f"Func_{call_data['callee']}_{ns}/{rel_posix}"
             add_node(db_path, caller_id, "Fact_Node", {"entity_type": "Component", "name": call_data['caller'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
             add_node(db_path, callee_id, "Fact_Node", {"entity_type": "Component", "name": call_data['callee'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
             add_relation(db_path, caller_id, callee_id, "CALLS", trust_score=1.0, verification_method="source_parse")
             
         pre_sweep_file_imports(db_path, file_id)
         for imp in set(entities["imports"]):
-            clean_imp = imp.replace('"', '').replace("'", "").strip(';')
-            target_id = f"Dependency_{clean_imp}"
+            clean_imp = sanitize_import_module(imp, ext)
+            if not clean_imp:
+                continue
+            target_id = f"Dependency_{ns}/{clean_imp}"
             add_node(db_path, target_id, "Fact_Node", {"entity_type": "External_Dependency", "module": clean_imp, "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=0.8, verification_method="source_parse", link_to=root_id, link_type="USES", agent_name=agent_name, rationale=rationale)
             add_relation(db_path, file_id, target_id, "IMPORTS", trust_score=1.0, verification_method="source_parse")
             
