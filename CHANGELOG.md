@@ -2,6 +2,13 @@
 
 All notable changes to the Graph-Memory project will be documented in this file.
 
+## [v3.5.1] - 2026-08-16
+- **Hash-Skip Incremental Ingestion**: Both `ingest-code` and `ingest-file` compare the stored per-file SHA-256 (`file_hash` node property) before doing any work. Unchanged files skip parser loading (no tree-sitter import on fully-unchanged runs), parsing, ghost sweeps, and upserts — re-ingesting an untouched repo performs zero writes, making hook-driven re-ingests essentially free. `ingest-code` now reports `{"parsed": n, "skipped": m}` and `ingest-file` returns `"unchanged"` status for untouched files.
+- **Prompt-Stable Snapshots**: Snapshot rendering is now deterministic (nodes ordered by stable node ID instead of volatile trust/verification timestamps) and fingerprint-cached in a new `Snapshot_Cache` table (graph content + generation params). An unchanged graph returns the byte-identical snapshot, so injected agent system prompts keep their prompt-cache prefix intact across sessions.
+- **Sweep Root Protection**: `sweep_orphans` now protects every `Project_*` root node from being swept (previously its hardcoded default root matched no real node since the v3.4.0 namespace scheme and could have soft-deleted legitimate project roots).
+- **PyPI Publish Automation**: New `.github/workflows/publish.yml` builds sdist+wheel and publishes to PyPI via OIDC trusted publishing on `v*` tags. Requires a one-time PyPI trusted-publisher setup (repo `divyanshailani/graph-memory`, workflow `publish.yml`, environment `pypi`).
+- **Regression Tests**: Added `test_v3_5_1_living_memory.py` (hash-skip zero-write re-ingestion, `unchanged` status, snapshot byte-stability + deterministic ordering, Project-root sweep protection). 45 tests passing.
+
 ## [v3.5.0] - 2026-08-16
 - **Harness-Agnostic Lifecycle Dispatcher (`graph_memory/core/lifecycle.py`)**: New `graph-memory hook-event` command reads a JSON hook payload from stdin and dispatches it — `PostToolUse` auto-ingests the edited file (<5ms incremental AST), `Stop`/`SessionEnd` logs the transcript tail into FTS5 Session_Logs and distills `[Fact:]`/`[Decision:]` markers into graph facts, and `SessionStart` refreshes every installed snapshot file. Silent on success (compatible with strict hook output schemas like ZCode's); never raises into the host harness.
 - **Four New Framework Integrations**: `zcode` (event hooks in `~/.zcode/cli/config.json` with `hooks.enabled: true`, portable `process`-type entries), `cursor` (MCP registration in `~/.cursor/mcp.json` + `alwaysApply` rule with lifecycle protocol), `qoder` (rule file in `~/.qoder/rules/`), and `opencode` (marked auto-section in `AGENTS.md`, no config clobbering). All installs are idempotent and preserve existing user configuration.

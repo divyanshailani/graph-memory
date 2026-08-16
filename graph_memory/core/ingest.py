@@ -371,9 +371,20 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
         rel_posix = path.name
 
     file_id = f"File_{ns}/{rel_posix}"
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    # Hash-skip: if the file content is unchanged since the last ingestion,
+    # skip parsing and upserts entirely (keeps hook-driven re-ingests near-free).
+    with get_connection(db_path) as conn:
+        stored_hash = conn.execute(
+            "SELECT json_extract(properties, '$.file_hash') FROM Nodes WHERE id = ? AND is_deleted = 0",
+            (file_id,),
+        ).fetchone()
+    if stored_hash and stored_hash[0] == file_hash:
+        return {"status": "unchanged", "file": str(path), "functions": 0, "classes": 0, "calls": 0, "extends": 0}
+
     pre_sweep_file_components(db_path, file_id)
     
-    file_hash = hashlib.sha256(content).hexdigest()
     mtime = path.stat().st_mtime
     
     add_node(
@@ -475,6 +486,8 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
     add_node(db_path, root_id, "Fact_Node", {"entity_type": "Project", "path": str(directory), "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
     
     created_mocs = set()
+    parsed_files = 0
+    skipped_files = 0
     
     for path in directory.rglob("*"):
         if not path.is_file():
@@ -490,40 +503,57 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
         ext = path.suffix
         if ext not in PARSER_PACKAGES:
             continue
-            
-        if ext not in parsers:
-            parsers[ext] = load_parser(ext)
-            
-        parser = parsers[ext]
-        if parser is None:
-            continue
-            
+
         try:
             content = path.read_bytes()
             if b'\x00' in content[:1024]:
                 print(f"[!] Skipping {path.name}: binary file detected.")
                 continue
+        except Exception as e:
+            print(f"[!] Failed to read {path.name}: {e}")
+            continue
+
+        rel_parent = path.parent.relative_to(directory)
+        rel_dir = rel_parent.as_posix()
+        rel_posix = path.relative_to(directory).as_posix()
+        file_id = f"File_{ns}/{rel_posix}"
+
+        # Hash-skip: unchanged files skip parser loading, parsing, and all upserts.
+        file_hash = hashlib.sha256(content).hexdigest()
+        with get_connection(db_path) as conn:
+            stored_hash = conn.execute(
+                "SELECT json_extract(properties, '$.file_hash') FROM Nodes WHERE id = ? AND is_deleted = 0",
+                (file_id,),
+            ).fetchone()
+        if stored_hash and stored_hash[0] == file_hash:
+            skipped_files += 1
+            continue
+
+        if ext not in parsers:
+            parsers[ext] = load_parser(ext)
+
+        parser = parsers[ext]
+        if parser is None:
+            continue
+
+        try:
             tree = parser.parse(content)
         except Exception as e:
             print(f"[!] Failed to parse {path.name}: {e}")
             continue
+        parsed_files += 1
             
         entities = {"functions": [], "classes": [], "imports": [], "calls": [], "extends": []}
         extract_entities(tree.root_node, ext, entities, content)
         extract_calls_and_inheritance(tree.root_node, ext, entities, "", content)
-        
-        rel_parent = path.parent.relative_to(directory)
-        rel_dir = rel_parent.as_posix()
-        rel_posix = path.relative_to(directory).as_posix()
+
         moc_id = f"MOC_{ns}" if rel_dir in (".", "") else f"MOC_{ns}/{rel_dir}"
         if moc_id not in created_mocs:
             add_node(db_path, moc_id, "Fact_Node", {"entity_type": "MOC_Hub", "dir": rel_dir, "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=root_id, link_type="PART_OF", agent_name=agent_name, rationale=rationale)
             created_mocs.add(moc_id)
-            
-        file_id = f"File_{ns}/{rel_posix}"
+
         pre_sweep_file_components(db_path, file_id)
-        
-        file_hash = hashlib.sha256(content).hexdigest()
+
         mtime = path.stat().st_mtime
         
         add_node(
@@ -630,4 +660,5 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
             add_node(db_path, target_id, "Fact_Node", {"entity_type": "External_Dependency", "module": clean_imp, "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=0.8, verification_method="source_parse", link_to=root_id, link_type="USES", agent_name=agent_name, rationale=rationale)
             add_relation(db_path, file_id, target_id, "IMPORTS", trust_score=1.0, verification_method="source_parse")
             
-    print("[*] AST Ingestion Complete!")
+    print(f"[*] AST Ingestion Complete! (parsed: {parsed_files}, hash-skipped: {skipped_files})")
+    return {"status": "success", "parsed": parsed_files, "skipped": skipped_files}

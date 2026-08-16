@@ -137,6 +137,17 @@ def init_db(db_path: str):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON Session_Logs(session_id);")
             conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS Session_Logs_fts USING fts5(session_id, agent_name, role, content);")
 
+            # Snapshot cache: stores the last rendered prompt snapshot with a content
+            # fingerprint so unchanged graphs return byte-identical text (prompt-cache stable).
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS Snapshot_Cache (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    fingerprint TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    generated_at TEXT NOT NULL
+                )
+            """)
+
             # Migration for existing databases
             try:
                 conn.execute("ALTER TABLE Nodes ADD COLUMN trust_score FLOAT DEFAULT 1.0")
@@ -481,22 +492,22 @@ def get_or_create_node(
             return node_id
 
 def sweep_orphans(db_path: str, root_id: str = None) -> int:
-    """Soft-deletes all nodes that have 0 edges, excluding the root node if provided. Returns rows affected."""
+    """Soft-deletes all edge-less nodes, excluding every Project root (Project_* nodes)
+    plus the explicitly provided root. Project roots are structural hubs and are never swept,
+    even when temporarily edge-less. Returns rows affected."""
     init_db(db_path)
     
-    if root_id is None:
-        root_id = os.environ.get("GRAPH_MEMORY_ROOT_ID", "Project_Graph_Memory")
-        
     with get_connection(db_path) as conn:
         with write_transaction(conn):
             cursor = conn.execute("""
                 UPDATE Nodes 
                 SET is_deleted = 1, updated_at = ?
-                WHERE id != ? 
+                WHERE id != ?
+                          AND id NOT LIKE 'Project\\_%' ESCAPE '\\'
                   AND is_deleted = 0
                   AND NOT EXISTS (SELECT 1 FROM Edges WHERE source_id = Nodes.id)
                   AND NOT EXISTS (SELECT 1 FROM Edges WHERE target_id = Nodes.id)
-            """, (now_iso(), root_id))
+            """, (now_iso(), root_id or ""))
             return cursor.rowcount
 
 def create_relation(
