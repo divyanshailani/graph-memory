@@ -153,4 +153,4 @@ def test_http_app_builds():
     app = create_http_app()
     route_paths = {getattr(r, "path", None) for r in app.routes}
     assert "/health" in route_paths
-    assert "/mcp" in route_paths
+    assert "" in route_paths  # MCP handler mounted at root: POST /mcp matches directly (no 307)
