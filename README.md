@@ -1,45 +1,45 @@
-# Epistemic Graph Memory (v3.0.0)
+# Epistemic Graph Memory (v3.7.0)
 
 ![Epistemic Graph Memory 2D UI Global View](assets/screenshot2.png)
 
-A universal, long-term project memory and structural context tool for AI coding agents (Antigravity, Hermes, Claude, Cursor, Codex, OpenHands, Ollama).
+A universal, long-term project memory and structural context tool for AI coding agents (Antigravity, Hermes, Claude, Cursor, Codex, ZCode, Qoder, OpenCode, Ollama).
 
-**Epistemic Graph Memory** provides a local, SQLite-backed knowledge graph with **Dynamic Epistemic Trust Decay**, **First-Class Decision Audit Ledgers**, **Codebase AST Call-Graph Awareness**, **Hermes-Class Prompt Snapshots**, and **Continuous Micro-Compaction**.
+**Epistemic Graph Memory** provides a local, SQLite-backed knowledge graph with **Dynamic Epistemic Trust Decay**, **First-Class Decision Audit Ledgers**, **Contradiction Detection**, **Codebase AST Call-Graph Awareness** (cross-file), **Automated Lifecycle Hooks**, and **Continuous Micro-Compaction**.
 
-Exposed natively via the **Model Context Protocol (MCP)** and CLI.
+Exposed via the **Model Context Protocol (MCP)** — stdio and **streamable HTTP** — plus a 25-command CLI. Installs itself into 9 agent harnesses with one command.
 
 ---
 
-## 🌟 Core Features (v3.0.0)
+## 🌟 Core Features
 
-### 1. 🌲 Hermes-Class Declarative Memory & Auto-Recall Snapshots
-* **Prompt-Cache Friendly Snapshots (`graph-memory snapshot`)**: Automatically generates ultra-dense, 500-token Markdown snapshots of active, high-trust graph facts (`effective_trust >= 0.7`) and recent milestones to inject into LLM system prompts on session startup.
-* **Continuous Micro-Compaction (`distill_session`)**: Based on Hermes Agent micro-compaction principles, **verbatim user intent is preserved**, while large assistant tool outputs and file reads are continuously distilled into structured graph facts.
-* **Episodic Session Logging & FTS5 Search (`search-sessions`)**: Logs all multi-session conversation history into SQLite FTS5 for zero-friction historic turn retrieval.
+### 1. 🪝 Automated Lifecycle Memory (v3.5.0)
+* **Harness-Agnostic Hook Dispatcher (`graph-memory hook-event`)**: `PostToolUse` → incremental AST ingest of edited files (<5ms); `Stop` → transcript captured into FTS5 Session_Logs + facts distilled into the graph; `SessionStart` → every installed snapshot file refreshed.
+* **9 Framework Integrations**: real event hooks for Claude Code and ZCode; MCP registration + lifecycle protocol for Cursor, Codex, and OpenCode; instruction/snapshot files for Antigravity, Qoder, and Hermes. `graph-memory hook install` — idempotent, non-destructive.
 
-### 2. ⏳ Dynamic Epistemic Trust Decay
-* **Cognitive Forgetting Math**: Calculates dynamic, query-time trust decay without mutating baseline data:
-  $$\text{Effective Trust} = \text{Base Trust Score} \times \left(0.5^{\frac{\Delta t}{30.0}}\right)$$
-* **Automatic Re-Verification**: Re-verifying a node or re-parsing code updates `last_verified_at = now()`, immediately restoring effective trust to **100%**.
-* **Decay Retrieval Filtering**: `search_nodes` and `serialize_subgraph` automatically filter out stale entities below `min_trust`.
+### 2. ⏳ Dynamic Epistemic Trust Decay & Contradiction Detection
+* **Cognitive Forgetting Math**: query-time trust decay — `Effective = Base × 0.5^(Δdays/30)` — without mutating baseline data. Re-verification restores 100%.
+* **Contradiction Detection (v3.7.0)**: when different agents assert different values for the same fact, the conflict is recorded and surfaced as `⚠ Conflicting Assertions` in snapshots — disagreements become visible instead of silently overwriting.
+* **Stale-Node GC (`graph-memory prune`)**: soft-deletes decayed, unreferenced nodes past a staleness threshold.
 
 ### 3. 📜 First-Class Multi-Agent Decision Ledger
-* **Append-Only Audit Trail (`Decision_Ledger`)**: Tracks *which* agent made *what* decision, *why* (rationale), and *when*.
-* **CLI & MCP Querying**: Query decision history by agent, node ID, or timeframe (`graph-memory query-history --agent Hermes`).
+* **Append-Only Audit Trail**: tracks *which* agent made *what* decision, *why*, and *when* — mechanical AST re-parses are kept out (signal, not noise).
+* **Real Reflection Engine (v3.7.0)**: `graph-memory memory reflect` digests the last 30 days of actual decisions into 5 standardized memory categories — real rationales, not templates.
 
-### 4. 🔍 Codebase AST & Call Graph Awareness
-* **Polyglot AST Ingestion (`ingest-code`)**: Deterministic parsing of Python, TypeScript (`.ts`, `.tsx`), JavaScript (`.js`, `.jsx`), Go, and Rust repositories via Tree-sitter.
-* **Production Call Graphs & Inheritance**: Extracts function call chains (`Func_A -[CALLS]-> Func_B`) and class inheritance (`Class_Sub -[EXTENDS]-> Class_Base`).
-* **Code Snippets & Line Bounds**: Extracts exact function signatures, docstrings, line bounds (`L10-L45`), and code snippets (`read_code_snippet`).
-* **<5ms Single-File Re-parsing (`ingest-file`)**: Incremental single-file re-parsing for instant updates during editing.
-* **Ghost Component Pruning**: Automatically prunes obsolete function/class nodes when source files are updated.
+### 4. 🔍 Codebase AST & Cross-File Call Graphs
+* **Polyglot AST Ingestion** (`ingest-code`): Python, TypeScript/TSX, JavaScript/JSX, Go, Rust via Tree-sitter — signatures, docstrings, line bounds, snippets.
+* **Cross-File Call Resolution (v3.7.0)**: CALLS edges are resolved to definitions across file boundaries (unique-name matching within the project namespace).
+* **Batch Ingestion (v3.7.0)**: one connection + one transaction per file — full-repo ingestion is ~17× faster; **hash-skip** makes unchanged re-ingestion near-instant (8.5s → 0.06s on this repo).
+* **Trigram Identifier Search (v3.7.0)**: partial identifiers like `effective_tr` match exactly — the default tokenizer can't do that.
+* **<5ms Single-File Re-Parsing (`ingest-file`)** with `--root` monorepo-safe namespace pinning.
 
-### 5. 🔀 Entity Merging & Canonical Pointers
-* **Soft-Delete Merging (`merge_nodes` / `merge`)**: Merges duplicate entities with canonical pointer resolution (`resolve_canonical_id`), alias array tracking, and full history propagation.
+### 5. 🧠 Hermes-Class Snapshots & Micro-Compaction
+* **Prompt-Cache-Stable Snapshots**: deterministic ordering + content fingerprinting — an unchanged graph returns the byte-identical snapshot, keeping agent prompt caches intact.
+* **Continuous Micro-Compaction (`distill_session`)**: verbatim user intent preserved; assistant tool output distilled into structured graph facts.
+* **Episodic Session Logging & FTS5 Search** (`search-sessions`), auto-populated by lifecycle hooks.
 
-### 6. 🎨 2D & GPU-Accelerated 3D Visualizations
-* **Interactive HTML Export (`export_html`)**: Visualizes graph nodes, relationships, and trust scores in interactive 2D.
-* **3D WebGL Viewer (`export-3d`)**: GPU-accelerated 3D force-directed graph visualizer (`vis-network@9.1.9`).
+### 6. 🔀 Entity Merging, Hygiene & Visualization
+* **Soft-Delete Merging** with canonical pointers and alias tracking; orphan linting; project-root-safe sweeps.
+* **2D & GPU-accelerated 3D visualizations** (`export_html`, `export-3d`).
 
 ---
 

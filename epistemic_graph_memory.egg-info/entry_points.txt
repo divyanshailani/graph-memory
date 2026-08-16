@@ -1,3 +1,4 @@
 [console_scripts]
 graph-memory = graph_memory.cli:main
 graph-memory-mcp = graph_memory.mcp.server:main
+graph-memory-mcp-http = graph_memory.mcp.http_server:main

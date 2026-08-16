@@ -1,7 +1,7 @@
 import os
 import json
 import hashlib
-from .engine import get_connection, write_transaction, calculate_effective_trust, init_db, query_decision_ledger, now_iso
+from .engine import get_connection, write_transaction, calculate_effective_trust, init_db, query_decision_ledger, detect_contradictions, now_iso
 
 
 def _render_snapshot_body(db_path: str, max_tokens: int, min_trust: float) -> str:
@@ -56,6 +56,15 @@ def _render_snapshot_body(db_path: str, max_tokens: int, min_trust: float) -> st
             lines.append("\n## Recent Multi-Agent Decisions")
             for d in decisions:
                 lines.append(f"- [{d['timestamp']}] {d['agent_name']}: {d['node_id']} -> {d['rationale']}")
+
+        contradictions = detect_contradictions(db_path, limit=3)
+        if contradictions:
+            lines.append("\n## ⚠ Conflicting Assertions (agents disagree — verify before relying)")
+            for c in contradictions:
+                latest = c["conflicts"][-1]
+                lines.append(
+                    f"- ⚠ [{c['node_id']}] {latest['key']}: '{latest['old']}' vs '{latest['new']}' (last: {latest['agent']})"
+                )
 
     result = "\n§\n".join(lines)
     if len(result) > char_limit:

@@ -80,6 +80,12 @@ def main():
     # Consolidate
     consolidate_parser = subparsers.add_parser("consolidate", help="Perform database housekeeping and reclaim disk space")
 
+    prune_parser = subparsers.add_parser("prune", help="Soft-delete stale, decayed, unreferenced nodes (GC)")
+    prune_parser.add_argument("--days", type=int, default=45, help="Staleness threshold in days (default 45)")
+    prune_parser.add_argument("--min-trust", type=float, default=0.2, help="Effective-trust floor below which nodes are pruned (default 0.2)")
+
+    contradictions_parser = subparsers.add_parser("contradictions", help="List nodes where agents asserted conflicting values")
+
     # Ingest File
     ingest_file_parser = subparsers.add_parser("ingest-file", help="Incrementally re-parse a single changed file into the AST graph")
     ingest_file_parser.add_argument("file_path", type=str, help="Path to modified file")
@@ -214,6 +220,14 @@ def main():
         elif args.command == "lint":
             results = engine.lint_graph(db_path, fix=args.fix)
             print(json.dumps(results, indent=2))
+
+        elif args.command == "prune":
+            pruned = engine.prune_stale_nodes(db_path, days=args.days, min_trust=args.min_trust)
+            print(f"Pruned {pruned} stale node(s) (older than {args.days}d, effective trust < {args.min_trust}, no incoming edges).")
+
+        elif args.command == "contradictions":
+            conflicts = engine.detect_contradictions(db_path)
+            print(json.dumps(conflicts, indent=2))
 
         elif args.command == "consolidate":
             stats = engine.consolidate_graph(db_path)

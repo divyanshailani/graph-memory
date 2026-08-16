@@ -1,3 +1,0 @@
-[console_scripts]
-graph-memory = graph_memory.cli:main
-graph-memory-mcp = graph_memory.mcp.server:main

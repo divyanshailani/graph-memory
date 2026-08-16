@@ -5,7 +5,7 @@ import json
 import importlib
 import hashlib
 from pathlib import Path
-from graph_memory.core.engine import get_or_create_node, create_relation as add_relation, get_connection, write_transaction, resolve_canonical_id, now_iso, init_db
+from graph_memory.core.engine import get_or_create_node, create_relation as add_relation, get_connection, write_transaction, resolve_canonical_id, now_iso, init_db, bulk_upsert_nodes
 
 def add_node(db_path, *args, **kwargs):
     """
@@ -558,117 +558,197 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
         extract_calls_and_inheritance(tree.root_node, ext, entities, "", content)
 
         moc_id = f"MOC_{ns}" if rel_dir in (".", "") else f"MOC_{ns}/{rel_dir}"
+        batch_nodes = {}
+        batch_edges = []
         if moc_id not in created_mocs:
-            add_node(db_path, moc_id, "Fact_Node", {"entity_type": "MOC_Hub", "dir": rel_dir, "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=1.0, verification_method="source_parse", link_to=root_id, link_type="PART_OF", agent_name=agent_name, rationale=rationale)
+            batch_nodes[moc_id] = {
+                "id": moc_id, "label": "Fact_Node",
+                "properties": {"entity_type": "MOC_Hub", "dir": rel_dir, "created_by": agent_name, "source": "AST", "confidence": 1.0},
+                "trust_score": 1.0, "verification_method": "source_parse",
+                "link_to": root_id, "link_type": "PART_OF",
+            }
             created_mocs.add(moc_id)
 
         pre_sweep_file_components(db_path, file_id)
 
         mtime = path.stat().st_mtime
-        
-        add_node(
-            db_path, 
-            file_id, 
-            "Fact_Node", 
-            {
-                "entity_type": "File", 
+
+        batch_nodes[file_id] = {
+            "id": file_id, "label": "Fact_Node",
+            "properties": {
+                "entity_type": "File",
                 "path": rel_posix,
                 "abs_path": str(path),
                 "project_root": str(directory),
                 "file_hash": file_hash,
                 "mtime": mtime,
-                "created_by": agent_name, 
-                "source": "AST", 
-                "confidence": 1.0
-            }, 
-            trust_score=1.0, 
-            verification_method="source_parse", 
-            link_to=moc_id, 
-            link_type="CONTAINS",
-            agent_name=agent_name,
-            rationale=rationale
-        )
-        
+                "created_by": agent_name,
+                "source": "AST",
+                "confidence": 1.0,
+            },
+            "trust_score": 1.0, "verification_method": "source_parse",
+            "link_to": moc_id, "link_type": "CONTAINS",
+        }
+
         for cls_data in entities["classes"]:
             cls_name = cls_data["name"]
             comp_id = f"Class_{cls_name}_{ns}/{rel_posix}"
-            add_node(
-                db_path, 
-                comp_id, 
-                "Fact_Node", 
-                {
-                    "entity_type": "Component", 
-                    "name": cls_name, 
-                    "component_type": "class", 
+            batch_nodes[comp_id] = {
+                "id": comp_id, "label": "Fact_Node",
+                "properties": {
+                    "entity_type": "Component",
+                    "name": cls_name,
+                    "component_type": "class",
                     "signature": cls_data["signature"],
                     "docstring": cls_data["docstring"],
                     "start_line": cls_data["start_line"],
                     "end_line": cls_data["end_line"],
                     "snippet": cls_data["snippet"],
                     "file_path": rel_posix,
-                    "created_by": agent_name, 
-                    "source": "AST", 
-                    "confidence": 1.0
-                }, 
-                trust_score=1.0, 
-                verification_method="source_parse", 
-                link_to=file_id, 
-                link_type="DEFINED_IN",
-                agent_name=agent_name,
-                rationale=rationale
-            )
-            
+                    "created_by": agent_name,
+                    "source": "AST",
+                    "confidence": 1.0,
+                },
+                "trust_score": 1.0, "verification_method": "source_parse",
+                "link_to": file_id, "link_type": "DEFINED_IN",
+            }
+
         for func_data in entities["functions"]:
             func_name = func_data["name"]
             comp_id = f"Func_{func_name}_{ns}/{rel_posix}"
-            add_node(
-                db_path, 
-                comp_id, 
-                "Fact_Node", 
-                {
-                    "entity_type": "Component", 
-                    "name": func_name, 
-                    "component_type": "function", 
+            batch_nodes[comp_id] = {
+                "id": comp_id, "label": "Fact_Node",
+                "properties": {
+                    "entity_type": "Component",
+                    "name": func_name,
+                    "component_type": "function",
                     "signature": func_data["signature"],
                     "docstring": func_data["docstring"],
                     "start_line": func_data["start_line"],
                     "end_line": func_data["end_line"],
                     "snippet": func_data["snippet"],
                     "file_path": rel_posix,
-                    "created_by": agent_name, 
-                    "source": "AST", 
-                    "confidence": 1.0
-                }, 
-                trust_score=1.0, 
-                verification_method="source_parse", 
-                link_to=file_id, 
-                link_type="DEFINED_IN",
-                agent_name=agent_name,
-                rationale=rationale
-            )
-            
+                    "created_by": agent_name,
+                    "source": "AST",
+                    "confidence": 1.0,
+                },
+                "trust_score": 1.0, "verification_method": "source_parse",
+                "link_to": file_id, "link_type": "DEFINED_IN",
+            }
+
+        def _stub(spec_id, name, kind):
+            # setdefault: a full definition spec already in the batch always wins
+            # over a same-file stub, so source stays "AST".
+            batch_nodes.setdefault(spec_id, {
+                "id": spec_id, "label": "Fact_Node",
+                "properties": {"entity_type": "Component", "name": name, "component_type": kind, "source": "AST_Inheritance" if kind == "class" else "AST_Call"},
+                "trust_score": 0.8, "verification_method": "source_parse",
+            })
+
         for ext_data in entities["extends"]:
             sub_cls = f"Class_{ext_data['sub_class']}_{ns}/{rel_posix}"
             super_cls = f"Class_{ext_data['super_class']}_{ns}/{rel_posix}"
-            add_node(db_path, sub_cls, "Fact_Node", {"entity_type": "Component", "name": ext_data['sub_class'], "component_type": "class", "source": "AST_Inheritance"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
-            add_node(db_path, super_cls, "Fact_Node", {"entity_type": "Component", "name": ext_data['super_class'], "component_type": "class", "source": "AST_Inheritance"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
-            add_relation(db_path, sub_cls, super_cls, "EXTENDS", trust_score=1.0, verification_method="source_parse")
-            
+            _stub(sub_cls, ext_data["sub_class"], "class")
+            _stub(super_cls, ext_data["super_class"], "class")
+            batch_edges.append({"source_id": sub_cls, "target_id": super_cls, "relation_type": "EXTENDS", "trust_score": 1.0, "verification_method": "source_parse"})
+
         for call_data in entities["calls"]:
             caller_id = f"Func_{call_data['caller']}_{ns}/{rel_posix}"
             callee_id = f"Func_{call_data['callee']}_{ns}/{rel_posix}"
-            add_node(db_path, caller_id, "Fact_Node", {"entity_type": "Component", "name": call_data['caller'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
-            add_node(db_path, callee_id, "Fact_Node", {"entity_type": "Component", "name": call_data['callee'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
-            add_relation(db_path, caller_id, callee_id, "CALLS", trust_score=1.0, verification_method="source_parse")
-            
+            _stub(caller_id, call_data["caller"], "function")
+            _stub(callee_id, call_data["callee"], "function")
+            batch_edges.append({"source_id": caller_id, "target_id": callee_id, "relation_type": "CALLS", "trust_score": 1.0, "verification_method": "source_parse"})
+
         pre_sweep_file_imports(db_path, file_id)
         for imp in set(entities["imports"]):
             clean_imp = sanitize_import_module(imp, ext)
             if not clean_imp:
                 continue
             target_id = f"Dependency_{ns}/{clean_imp}"
-            add_node(db_path, target_id, "Fact_Node", {"entity_type": "External_Dependency", "module": clean_imp, "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=0.8, verification_method="source_parse", link_to=root_id, link_type="USES", agent_name=agent_name, rationale=rationale)
-            add_relation(db_path, file_id, target_id, "IMPORTS", trust_score=1.0, verification_method="source_parse")
-            
-    print(f"[*] AST Ingestion Complete! (parsed: {parsed_files}, hash-skipped: {skipped_files})")
-    return {"status": "success", "parsed": parsed_files, "skipped": skipped_files}
+            batch_nodes[target_id] = {
+                "id": target_id, "label": "Fact_Node",
+                "properties": {"entity_type": "External_Dependency", "module": clean_imp, "created_by": agent_name, "source": "AST", "confidence": 1.0},
+                "trust_score": 0.8, "verification_method": "source_parse",
+                "link_to": root_id, "link_type": "USES",
+            }
+            batch_edges.append({"source_id": file_id, "target_id": target_id, "relation_type": "IMPORTS", "trust_score": 1.0, "verification_method": "source_parse"})
+
+        # One connection + one transaction per file instead of one per node.
+        bulk_upsert_nodes(db_path, list(batch_nodes.values()), batch_edges, agent_name=agent_name, rationale=rationale)
+
+    rewired = _resolve_cross_file_calls(db_path, ns)
+    print(f"[*] AST Ingestion Complete! (parsed: {parsed_files}, hash-skipped: {skipped_files}, cross-file calls resolved: {rewired})")
+    return {"status": "success", "parsed": parsed_files, "skipped": skipped_files, "calls_resolved": rewired}
+
+
+def _resolve_cross_file_calls(db_path: str, ns: str) -> int:
+    """
+    Post-pass (v3.7.0): CALLS edges initially point at same-file stubs. This pass
+    rewires every stub to the uniquely-named definition within the same project
+    namespace (identified structurally by its DEFINED_IN edge), so call graphs
+    cross file boundaries. Ambiguous names (multiple definitions) keep their stub.
+    Edge-less stubs are hard-deleted afterwards.
+    """
+    ns_token = f"_{ns}/"
+    with get_connection(db_path) as conn:
+        # Defined functions: sources of DEFINED_IN edges (component -> file).
+        defined = {}
+        for (def_id,) in conn.execute(
+            "SELECT DISTINCT source_id FROM Edges WHERE relation_type = 'DEFINED_IN'"
+        ).fetchall():
+            if not def_id.startswith("Func_") or ns_token not in def_id:
+                continue
+            row = conn.execute(
+                "SELECT properties FROM Nodes WHERE id = ? AND is_deleted = 0", (def_id,)
+            ).fetchone()
+            if not row:
+                continue
+            name = json.loads(row[0]).get("name") if row[0] else None
+            if name:
+                defined.setdefault(name, []).append(def_id)
+
+        # Stubs: CALLS targets that are not themselves definitions.
+        stub_ids = [
+            r[0] for r in conn.execute("""
+                SELECT DISTINCT e.target_id FROM Edges e
+                JOIN Nodes n ON n.id = e.target_id
+                WHERE e.relation_type = 'CALLS'
+                  AND n.is_deleted = 0
+                  AND e.target_id NOT IN (SELECT source_id FROM Edges WHERE relation_type = 'DEFINED_IN')
+            """).fetchall()
+            if r[0].startswith("Func_") and ns_token in r[0]
+        ]
+
+        rewired = 0
+        with write_transaction(conn):
+            for stub_id in stub_ids:
+                row = conn.execute("SELECT properties FROM Nodes WHERE id = ?", (stub_id,)).fetchone()
+                name = json.loads(row[0]).get("name") if row and row[0] else None
+                if not name:
+                    continue
+                candidates = [c for c in defined.get(name, []) if c != stub_id]
+                if len(candidates) != 1:
+                    continue  # ambiguous or unknown — leave the stub
+                target = candidates[0]
+
+                for (caller,) in conn.execute(
+                    "SELECT source_id FROM Edges WHERE target_id = ? AND relation_type = 'CALLS'",
+                    (stub_id,),
+                ).fetchall():
+                    conn.execute("""
+                        INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
+                        VALUES (?, ?, 'CALLS', '{}', ?, ?, 1.0, 'source_parse')
+                        ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+                            last_verified_at = excluded.last_verified_at
+                    """, (caller, target, now_iso(), now_iso()))
+                conn.execute(
+                    "DELETE FROM Edges WHERE target_id = ? AND relation_type = 'CALLS'", (stub_id,)
+                )
+                leftover = conn.execute(
+                    "SELECT 1 FROM Edges WHERE source_id = ? OR target_id = ? LIMIT 1",
+                    (stub_id, stub_id),
+                ).fetchone()
+                if not leftover:
+                    conn.execute("DELETE FROM Nodes WHERE id = ?", (stub_id,))
+                rewired += 1
+    return rewired

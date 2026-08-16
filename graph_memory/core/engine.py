@@ -201,6 +201,13 @@ def init_db(db_path: str):
                 ON Nodes(json_extract(properties, '$.type'))
             """)
 
+        # NOTE (v3.7.0): identifier/substring search uses a LIKE-based fallback in
+        # search_nodes instead of a second FTS5 index. An external-content trigram
+        # FTS5 table with keep-in-sync triggers proved fragile under WAL on
+        # SQLite 3.50.4 (trigger-driven updates intermittently raised "database
+        # disk image is malformed"); a substring scan over node IDs delivers the
+        # same behavior with no corruption surface.
+
 def calculate_effective_trust(base_trust: float, last_verified_at: str, half_life_days: float = 30.0) -> float:
     """
     Calculates time-decayed effective trust score based on Ebbinghaus forgetting curve half-life.
@@ -341,18 +348,35 @@ def search_nodes(db_path: str, query: str, min_trust: float = 0.6, half_life_day
     """
     init_db(db_path)
     with get_connection(db_path) as conn:
-        cursor = conn.execute("""
-            SELECT n.id, n.label, n.properties, n.status, n.trust_score, n.last_verified_at 
-            FROM NodesFTS f
-            JOIN Nodes n ON f.rowid = n.rowid
-            WHERE NodesFTS MATCH ? AND n.is_deleted = 0
-            ORDER BY rank
-            LIMIT 50
-        """, (query,))
-        
+        try:
+            rows = conn.execute("""
+                SELECT n.id, n.label, n.properties, n.status, n.trust_score, n.last_verified_at 
+                FROM NodesFTS f
+                JOIN Nodes n ON f.rowid = n.rowid
+                WHERE NodesFTS MATCH ? AND n.is_deleted = 0
+                ORDER BY rank
+                LIMIT 50
+            """, (query,)).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+
+        # Identifier fallback: single tokens like 'effective_trus' tokenize to nothing
+        # in the unicode61 index — substring-match node IDs directly instead.
+        if not rows and len(query) >= 3 and len(query.split()) == 1:
+            try:
+                rows = conn.execute("""
+                    SELECT n.id, n.label, n.properties, n.status, n.trust_score, n.last_verified_at
+                    FROM Nodes n
+                    WHERE n.is_deleted = 0 AND n.id LIKE ?
+                    ORDER BY n.id ASC
+                    LIMIT 50
+                """, (f"%{query}%",)).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+
         results = []
         matched_ids = []
-        for row in cursor.fetchall():
+        for row in rows:
             node_id, label, props_json, status, base_trust, last_verified_at = row
             eff_trust = calculate_effective_trust(base_trust or 1.0, last_verified_at, half_life_days)
             
@@ -451,7 +475,24 @@ def get_or_create_node(
                 existing_obs = existing_props.get("observations", [])
                 new_obs = props.get("observations", [])
                 combined_obs = list(dict.fromkeys(existing_obs + new_obs))
-                
+
+                # Epistemic contradiction tracking (v3.7.0): when an agent-driven
+                # upsert overwrites a scalar assertion with a different value, record
+                # the conflict. Mechanical AST re-verification (log_ledger=False)
+                # updates facts to current source-of-truth and never conflicts.
+                if log_ledger:
+                    conflicts = existing_props.get("conflicts", [])
+                    for ckey in ("description", "summary", "design_intent"):
+                        new_val = props.get(ckey)
+                        old_val = existing_props.get(ckey)
+                        if new_val and old_val and new_val != old_val:
+                            conflicts.append({
+                                "key": ckey, "old": old_val, "new": new_val,
+                                "agent": agent_name, "timestamp": now_iso(),
+                            })
+                    if conflicts:
+                        existing_props["conflicts"] = conflicts[-5:]
+
                 existing_props.update(props)
                 existing_props["observations"] = combined_obs
                 
@@ -491,6 +532,124 @@ def get_or_create_node(
             
             return node_id
 
+def bulk_upsert_nodes(db_path: str, nodes: list, edges: list = None, agent_name: str = "Tree-sitter", rationale: str = None) -> dict:
+    """
+    Batch ingestion primitive: upserts many nodes (and optional edges) in ONE
+    connection and ONE write transaction, with identical semantics to
+    get_or_create_node (history cap + consecutive dedupe, observation merge,
+    trust MAX) minus the Decision_Ledger write. Eliminates per-node connection
+    opens — the difference between minutes and seconds on repos with tens of
+    thousands of symbols.
+
+    nodes: [{id, label, properties, trust_score, verification_method, link_to, link_type}, ...]
+    edges: [{source_id, target_id, relation_type, trust_score, verification_method}, ...]
+    """
+    init_db(db_path)
+    ts = now_iso()
+    edges = edges or []
+    history_entry = {
+        "timestamp": ts,
+        "agent": agent_name,
+        "action": "upsert_node",
+        "rationale": rationale or "Node created or updated",
+    }
+
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            # Preload existing properties for all touched ids in one pass.
+            touched = [n["id"] for n in nodes]
+            touched += [n["link_to"] for n in nodes if n.get("link_to")]
+            touched += [e["source_id"] for e in edges] + [e["target_id"] for e in edges]
+            existing = {}
+            for i in range(0, len(touched), 500):
+                chunk = touched[i:i + 500]
+                placeholders = ",".join("?" * len(chunk))
+                for row_id, row_props in conn.execute(
+                    f"SELECT id, properties FROM Nodes WHERE id IN ({placeholders})", chunk
+                ).fetchall():
+                    existing[row_id] = row_props
+
+            for spec in nodes:
+                node_id = spec["id"]
+                props = dict(spec.get("properties") or {})
+                props.setdefault("author_agent", agent_name)
+                props["last_modified_by"] = agent_name
+                if rationale:
+                    props["rationale"] = rationale
+
+                if node_id in existing:
+                    raw = existing[node_id]
+                    existing_props = json.loads(raw) if raw else {}
+                    hist = existing_props.get("history", [])
+                    last = hist[-1] if hist else None
+                    if not (last and last.get("agent") == history_entry["agent"]
+                            and last.get("action") == history_entry["action"]
+                            and last.get("rationale") == history_entry["rationale"]):
+                        hist.append(dict(history_entry))
+
+                    combined_obs = list(dict.fromkeys(
+                        existing_props.get("observations", []) + props.get("observations", [])
+                    ))
+                    existing_props.update(props)
+                    existing_props["observations"] = combined_obs
+                    existing_props["history"] = hist[-MAX_NODE_HISTORY:]
+
+                    conn.execute("""
+                        UPDATE Nodes
+                        SET properties = ?, is_deleted = 0, status = 'active', updated_at = ?, last_verified_at = ?,
+                            access_count = access_count + 1, trust_score = MAX(trust_score, ?), verification_method = ?
+                        WHERE id = ?
+                    """, (json.dumps(existing_props), ts, ts, spec.get("trust_score", 1.0),
+                          spec.get("verification_method", "unknown"), node_id))
+                else:
+                    props["history"] = [dict(history_entry)]
+                    conn.execute("""
+                        INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (node_id, spec.get("label", "Fact_Node"), json.dumps(props), ts, ts, ts,
+                          spec.get("trust_score", 1.0), spec.get("verification_method", "unknown")))
+                    existing[node_id] = json.dumps(props)
+
+                link_to = spec.get("link_to")
+                if link_to:
+                    if link_to not in existing:
+                        conn.execute("""
+                            INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
+                            VALUES (?, 'Fact_Node', '{}', ?, ?, ?, 1.0, 'auto')
+                            ON CONFLICT(id) DO NOTHING
+                        """, (link_to, ts, ts, ts))
+                        existing[link_to] = "{}"
+                    conn.execute("""
+                        INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
+                        VALUES (?, ?, ?, '{}', ?, ?, ?, ?)
+                        ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+                            last_verified_at = excluded.last_verified_at,
+                            verification_method = excluded.verification_method,
+                            trust_score = MAX(trust_score, excluded.trust_score)
+                    """, (node_id, link_to, spec.get("link_type", "PART_OF"), ts, ts,
+                          spec.get("trust_score", 1.0), spec.get("verification_method", "unknown")))
+
+            for e in edges:
+                for endpoint in (e["source_id"], e["target_id"]):
+                    if endpoint not in existing:
+                        conn.execute("""
+                            INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
+                            VALUES (?, 'Fact_Node', '{}', ?, ?, ?, 1.0, 'auto')
+                            ON CONFLICT(id) DO NOTHING
+                        """, (endpoint, ts, ts, ts))
+                        existing[endpoint] = "{}"
+                conn.execute("""
+                    INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
+                    VALUES (?, ?, ?, '{}', ?, ?, ?, ?)
+                    ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+                        last_verified_at = excluded.last_verified_at,
+                        verification_method = excluded.verification_method,
+                        trust_score = MAX(trust_score, excluded.trust_score)
+                """, (e["source_id"], e["target_id"], e["relation_type"], ts, ts,
+                      e.get("trust_score", 1.0), e.get("verification_method", "unknown")))
+
+    return {"nodes": len(nodes), "edges": len(edges)}
+
 def sweep_orphans(db_path: str, root_id: str = None) -> int:
     """Soft-deletes all edge-less nodes, excluding every Project root (Project_* nodes)
     plus the explicitly provided root. Project roots are structural hubs and are never swept,
@@ -509,6 +668,60 @@ def sweep_orphans(db_path: str, root_id: str = None) -> int:
                   AND NOT EXISTS (SELECT 1 FROM Edges WHERE target_id = Nodes.id)
             """, (now_iso(), root_id or ""))
             return cursor.rowcount
+
+def detect_contradictions(db_path: str, limit: int = 20) -> list:
+    """Returns nodes carrying recorded conflicts — places where different agents
+    asserted different values for the same scalar fact. The epistemic core of
+    multi-agent memory: disagreements become visible instead of silently overwriting."""
+    init_db(db_path)
+    results = []
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, label, properties FROM Nodes "
+            "WHERE is_deleted = 0 AND properties LIKE '%\"conflicts\"%' LIMIT ?",
+            (limit,),
+        ).fetchall()
+        for node_id, label, props_json in rows:
+            props = json.loads(props_json) if props_json else {}
+            conflicts = props.get("conflicts", [])
+            if conflicts:
+                results.append({"node_id": node_id, "label": label, "conflicts": conflicts})
+    return results
+
+def prune_stale_nodes(db_path: str, days: int = 45, min_trust: float = 0.2, half_life_days: float = 30.0) -> int:
+    """
+    Garbage collection: soft-deletes nodes that are all of — older than `days`
+    since last verification, decayed below `min_trust` effective trust, and
+    without incoming edges (nothing references them). Project roots are never pruned.
+    Returns the number of pruned nodes.
+    """
+    init_db(db_path)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    doomed = []
+    with get_connection(db_path) as conn:
+        candidates = conn.execute("""
+            SELECT id, trust_score, last_verified_at FROM Nodes
+            WHERE is_deleted = 0
+                          AND id NOT LIKE 'Project\\_%' ESCAPE '\\'
+              AND last_verified_at < ?
+              AND NOT EXISTS (SELECT 1 FROM Edges WHERE target_id = Nodes.id)
+        """, (cutoff,)).fetchall()
+        for node_id, base_trust, last_verified in candidates:
+            eff = calculate_effective_trust(base_trust or 1.0, last_verified, half_life_days)
+            if eff < min_trust:
+                doomed.append(node_id)
+
+        if doomed:
+            with write_transaction(conn):
+                for i in range(0, len(doomed), 500):
+                    chunk = doomed[i:i + 500]
+                    placeholders = ",".join("?" * len(chunk))
+                    conn.execute(
+                        f"UPDATE Nodes SET is_deleted = 1, status = 'pruned', updated_at = ? "
+                        f"WHERE id IN ({placeholders})",
+                        (now_iso(), *chunk),
+                    )
+    return len(doomed)
 
 def create_relation(
     db_path: str, 

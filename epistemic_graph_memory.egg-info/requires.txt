@@ -10,9 +10,15 @@ tree-sitter-typescript
 tree-sitter-javascript
 tree-sitter-go
 tree-sitter-rust
+uvicorn>=0.23.0
+starlette>=0.27.0
 
 [go]
 tree-sitter-go
+
+[http]
+uvicorn>=0.23.0
+starlette>=0.27.0
 
 [javascript]
 tree-sitter-javascript
