@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <code>pip install epistemic-graph-memory[all]</code>
+  <code>python -m pip install 'epistemic-graph-memory[all]'</code>
 </p>
 
 <p align="center">
@@ -30,7 +30,7 @@ AI coding agents reconstruct project context from scratch every session. They re
 
 A **SQLite-backed knowledge graph** that lives in your project at `.agents/graph_memory.sqlite`. It ingests your codebase's AST (functions, classes, call graphs, imports), records agent decisions in an append-only ledger, detects when agents contradict each other, and produces deterministic snapshots that inject directly into agent system prompts — with byte-stable caching so prompt caches stay hot.
 
-All 12 MCP tools, a 25-command CLI, lifecycle hooks for 9 agent harnesses, and a streamable HTTP endpoint for remote agents.
+All 19 MCP tools, a 28-command CLI, lifecycle hooks for 9 agent harnesses, and a streamable HTTP endpoint for remote agents.
 
 ---
 
@@ -53,13 +53,13 @@ All 12 MCP tools, a 25-command CLI, lifecycle hooks for 9 agent harnesses, and a
 ## Setup
 
 ```bash
-pip install epistemic-graph-memory[all]
+python -m pip install 'epistemic-graph-memory[all]'
 ```
 
-The `[all]` extra installs Tree-sitter parsers for all 6 languages plus the HTTP transport (uvicorn + starlette). If you only need Python:
+The `[all]` extra installs Tree-sitter parsers for all 7 language variants plus the HTTP transport (uvicorn + starlette). If you only need Python:
 
 ```bash
-pip install epistemic-graph-memory
+python -m pip install epistemic-graph-memory
 ```
 
 ### MCP configuration
@@ -83,6 +83,17 @@ graph-memory-mcp-http                    # http://127.0.0.1:8765/mcp
 ```
 
 Then point your agent at `http://127.0.0.1:8765/mcp`.
+
+**Security (v3.8.0):** The HTTP server defaults to localhost (127.0.0.1) and includes DNS rebinding protection. For remote deployment:
+
+- Set `GRAPH_MEMORY_API_KEY` environment variable to require authentication
+- Use a reverse proxy (nginx, Caddy) with TLS
+- Bind to `0.0.0.0` only behind a firewall/VPN
+- Never expose the server directly to the public internet (it provides full filesystem and database access)
+
+```bash
+GRAPH_MEMORY_API_KEY=your-secret-key graph-memory-mcp-http
+```
 
 ### One-command agent hooks
 
@@ -169,11 +180,11 @@ graph_memory/
 │   ├── distill.py       # Session transcript micro-compaction
 │   └── knowledge.py     # LLM-powered MOC summarization
 ├── mcp/
-│   ├── server.py        # Stdio MCP server (12 tools)
+│   ├── server.py        # Stdio MCP server (19 tools)
 │   └── http_server.py   # Streamable HTTP MCP transport
 ├── integrations/
 │   └── framework_hooks.py  # 9-framework auto-install + lifecycle wiring
-└── cli.py               # 25-command CLI
+└── cli.py               # 28-command CLI
 ```
 
 **Storage**: Single SQLite file per project at `.agents/graph_memory.sqlite`. WAL mode for concurrent safety. FTS5 for full-text search. No external databases, no servers, no cloud.
@@ -188,12 +199,12 @@ graph_memory/
 
 | Metric | Value |
 |---|---|
-| Source code | 5,066 lines Python |
+| Source code | 5,069 lines Python |
 | Test code | 1,672 lines, 57 tests |
-| MCP tools | 12 |
-| CLI commands | 25 |
+| MCP tools | 19 |
+| CLI commands | 28 |
 | Agent harnesses | 9 |
-| AST languages | 6 (Python, TS, TSX, JS, JSX, Go, Rust) |
+| AST languages | 7 variants (Python, TS, TSX, JS, JSX, Go, Rust) |
 | Dependencies | 4 runtime (mcp, tree-sitter + 2 parsers) |
 | External services | 0 |
 

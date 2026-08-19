@@ -1,5 +1,16 @@
 # Changelog
 
+## [v3.8.0] - 2026-08-19
+- **MCP Dependency Fix**: Pinned `mcp>=1.28,<2` to prevent incompatibility with MCP 2.x (fixes clean install failures)
+- **HTTP Transport Security**: Added DNS rebinding protection, optional API key authentication via `GRAPH_MEMORY_API_KEY`, and security warnings for remote deployment
+- **Incremental Ingestion Edge Cleanup**: Fixed ghost CALLS/EXTENDS/IMPORTS edges when code structure changes; `ingest_file` now calls edge cleanup and cross-file resolution
+- **MCP Error Handling**: Proper error responses with `isError=True` flag instead of plain text content
+- **Batch MCP Mutations**: New atomic batch functions (`batch_create_entities`, `batch_create_relations`, `batch_add_observations`) with single-transaction semantics
+- **Pre-Publish CI Validation**: Tests, twine check, and smoke tests now run before PyPI publish
+- **Python Version Matrix**: CI now tests Python 3.10, 3.11, 3.12, and 3.13
+- **Documentation Updates**: Corrected tool/command counts (19 MCP tools, 28 CLI commands), fixed zsh install command quoting
+- **Package Discovery**: Fixed setuptools configuration to exclude tests from wheel distribution
+
 ## [v3.7.1] - 2026-08-16
 - **Repo presentation overhaul**: README rewritten to showcase the actual project (architecture, real numbers, no filler). SKILL.md updated from v2.1 boilerplate to v3.7. Egg-info, `__pycache__`, and build artifacts removed from git tracking. `conftest.py` moved to `tests/`. `.gitignore` expanded. `pyproject.toml` given keywords, license, URLs, and an honest description.
 - **CHANGELOG compressed**: v1.0–v3.3 collapsed to one-line summaries (full history in git log); v3.6.0+ kept detailed.

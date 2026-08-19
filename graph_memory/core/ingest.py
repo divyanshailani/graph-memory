@@ -25,6 +25,34 @@ def pre_sweep_file_imports(db_path: str, file_node_id: str):
                 WHERE source_id = ? AND relation_type = 'IMPORTS'
             """, (file_node_id,))
 
+def pre_sweep_file_edges(db_path: str, file_node_id: str):
+    """
+    Deletes existing CALLS and EXTENDS edges for all components defined in a file
+    before re-parsing to prevent ghost edges when code structure changes.
+    
+    This is called by ingest_file to ensure that removed function calls or changed
+    inheritance relationships don't leave stale edges in the graph.
+    """
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            # Get all component IDs defined in this file
+            component_ids = [
+                row[0] for row in conn.execute(
+                    "SELECT source_id FROM Edges WHERE target_id = ? AND relation_type = 'DEFINED_IN'",
+                    (file_node_id,)
+                ).fetchall()
+            ]
+            
+            if not component_ids:
+                return
+            
+            # Delete CALLS and EXTENDS edges where these components are the source
+            placeholders = ",".join("?" * len(component_ids))
+            conn.execute(
+                f"DELETE FROM Edges WHERE source_id IN ({placeholders}) AND relation_type IN ('CALLS', 'EXTENDS')",
+                component_ids
+            )
+
 def pre_sweep_file_components(db_path: str, file_node_id: str):
     """Soft-deletes all component nodes defined in a file before re-parsing to prune ghost nodes."""
     with get_connection(db_path) as conn:
@@ -385,7 +413,10 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
     if stored_hash and stored_hash[0] == file_hash:
         return {"status": "unchanged", "file": str(path), "functions": 0, "classes": 0, "calls": 0, "extends": 0}
 
-    pre_sweep_file_components(db_path, file_id)
+    # Clean up old edges and components before re-parsing
+    pre_sweep_file_components(db_path, file_id)  # Soft-delete old component nodes
+    pre_sweep_file_edges(db_path, file_id)  # Delete old CALLS/EXTENDS edges
+    pre_sweep_file_imports(db_path, file_id)  # Delete old IMPORTS edges
     
     mtime = path.stat().st_mtime
     
@@ -473,7 +504,19 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
         callee_id = f"Func_{call_data['callee']}_{ns}/{rel_posix}"
         add_node(db_path, callee_id, "Fact_Node", {"entity_type": "Component", "name": call_data['callee'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
         add_relation(db_path, caller_id, callee_id, "CALLS", trust_score=1.0, verification_method="source_parse")
-        
+    
+    # Process imports (create IMPORTS edges to Dependency nodes)
+    for imp in set(entities["imports"]):
+        clean_imp = sanitize_import_module(imp, ext)
+        if not clean_imp:
+            continue
+        target_id = f"Dependency_{ns}/{clean_imp}"
+        add_node(db_path, target_id, "Fact_Node", {"entity_type": "External_Dependency", "module": clean_imp, "created_by": agent_name, "source": "AST", "confidence": 1.0}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
+        add_relation(db_path, file_id, target_id, "IMPORTS", trust_score=1.0, verification_method="source_parse")
+    
+    # Resolve cross-file CALLS edges to wire stubs to actual definitions
+    _resolve_cross_file_calls(db_path, ns)
+    
     return {"status": "success", "file": str(path), "functions": len(entities["functions"]), "classes": len(entities["classes"]), "calls": len(entities["calls"]), "extends": len(entities["extends"])}
 
 def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter", rationale: str = "Full project AST ingestion", root: str = None):

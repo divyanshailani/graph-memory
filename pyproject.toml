@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "epistemic-graph-memory"
-version = "3.7.1"
+version = "3.8.0"
 authors = [
   { name="Divyansh Ailani" },
 ]
@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "mcp>=1.1.2",
+    "mcp>=1.28,<2",
     "tree-sitter>=0.22.0",
     "tree-sitter-javascript>=0.25.0",
     "tree-sitter-python>=0.25.0",
@@ -56,6 +56,7 @@ graph-memory-mcp = "graph_memory.mcp.server:main"
 graph-memory-mcp-http = "graph_memory.mcp.http_server:main"
 [tool.setuptools.packages.find]
 where = ["."]
+exclude = ["tests*", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

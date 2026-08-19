@@ -20,8 +20,14 @@ server = Server("graph-memory")
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
     """
-    Exposes the 9 standard Anthropic MCP Memory Tool signatures.
-    This makes the package a "Drop-In Replacement" for the official memory server.
+    Exposes 19 MCP tools for graph memory operations:
+    - Standard memory tools: create_entities, create_relations, add_observations, read_graph, search_nodes, open_nodes, delete_entities, merge_entities
+    - AST tools: ingest_file, read_code_snippet
+    - Decision tools: query_decision_history
+    - Session tools: search_session_history, distill_session
+    - Snapshot tools: get_active_snapshot
+    - Wiki tools: generate_wiki, extract_knowledge_cards
+    - Reflection tools: reflect_session_memory
     """
     seed_context = engine.get_seed_memory(DB_PATH)
     if os.environ.get("GRAPH_MEMORY_AUTO_SNAPSHOT") == "1":
@@ -363,32 +369,18 @@ async def handle_call_tool(
     try:
         if name == "create_entities":
             entities = arguments.get("entities", [])
-            for ent in entities:
-                engine.get_or_create_node(
-                    actual_db_path,
-                    node_id=ent["name"],
-                    label=ent["entityType"],
-                    properties={"observations": ent.get("observations", []), "type": ent["entityType"]}
-                )
-            return [types.TextContent(type="text", text=f"Created {len(entities)} entities successfully.")]
+            result = engine.batch_create_entities(actual_db_path, entities)
+            return [types.TextContent(type="text", text=f"Created {result['created']} entities successfully ({result['total']} total).")]
 
         elif name == "create_relations":
             relations = arguments.get("relations", [])
-            for rel in relations:
-                engine.create_relation(
-                    actual_db_path,
-                    source_id=rel["from"],
-                    target_id=rel["to"],
-                    relation_type=rel["relationType"]
-                )
-            return [types.TextContent(type="text", text=f"Created {len(relations)} relations successfully.")]
+            result = engine.batch_create_relations(actual_db_path, relations)
+            return [types.TextContent(type="text", text=f"Created {result['created']} relations successfully ({result['total']} total).")]
 
         elif name == "add_observations":
             observations = arguments.get("observations", [])
-            for obs in observations:
-                for content in obs.get("contents", []):
-                    engine.add_observation(actual_db_path, obs["entityName"], content)
-            return [types.TextContent(type="text", text=f"Added observations successfully.")]
+            result = engine.batch_add_observations(actual_db_path, observations)
+            return [types.TextContent(type="text", text=f"Added observations to {result['updated']} nodes successfully ({result['total']} total).")]
 
         elif name == "delete_entities":
             entityNames = arguments.get("entityNames", [])
@@ -451,7 +443,10 @@ async def handle_call_tool(
             if res.get("status") == "success":
                 return [types.TextContent(type="text", text=f"Successfully merged entity '{source_name}' into '{target_name}'.")]
             else:
-                return [types.TextContent(type="text", text=f"Error merging entities: {res.get('message')}")]
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text=f"Error merging entities: {res.get('message')}")],
+                    isError=True
+                )
 
         elif name == "read_code_snippet":
             node_id = arguments.get("node_id", "")
@@ -521,7 +516,10 @@ async def handle_call_tool(
             raise ValueError(f"Unknown tool: {name}")
 
     except Exception as e:
-        return [types.TextContent(type="text", text=f"Error executing {name}: {str(e)}")]
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=f"Error executing {name}: {str(e)}")],
+            isError=True
+        )
 
 async def run_mcp_server():
     """Runs the MCP server using stdio."""

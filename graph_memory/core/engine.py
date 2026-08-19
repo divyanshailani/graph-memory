@@ -1221,3 +1221,182 @@ def merge_nodes(db_path: str, source_id: str, target_id: str) -> dict:
             conn.execute("PRAGMA incremental_vacuum;")
             
     return {"status": "success", "source": canon_source, "target": canon_target}
+
+
+# ---------------------------------------------------------------------------
+# Batch Operations (v3.8.0)
+# ---------------------------------------------------------------------------
+
+def batch_create_entities(db_path: str, entities: list, agent_name: str = "AI-Agent") -> dict:
+    """
+    Create/update multiple nodes in a single transaction.
+    Returns count of created/updated nodes.
+    
+    entities: [{"name": "...", "entityType": "...", "observations": [...], ...}, ...]
+    """
+    if not entities:
+        return {"created": 0}
+    
+    init_db(db_path)
+    ts = now_iso()
+    created = 0
+    
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            for entity in entities:
+                node_id = entity.get("name", "")
+                if not node_id:
+                    continue
+                    
+                label = entity.get("entityType", "Fact_Node")
+                props = dict(entity.get("observations", {}))
+                props.setdefault("author_agent", agent_name)
+                props["last_modified_by"] = agent_name
+                trust = entity.get("trust_score", 1.0)
+                
+                # Check if node exists
+                existing = conn.execute(
+                    "SELECT properties FROM Nodes WHERE id = ? AND is_deleted = 0", (node_id,)
+                ).fetchone()
+                
+                if existing:
+                    # Merge properties
+                    old_props = json.loads(existing[0]) if existing[0] else {}
+                    old_props.update(props)
+                    conn.execute("""
+                        UPDATE Nodes 
+                        SET properties = ?, updated_at = ?, last_verified_at = ?, 
+                            trust_score = MAX(trust_score, ?)
+                        WHERE id = ?
+                    """, (json.dumps(old_props), ts, ts, trust, node_id))
+                else:
+                    # Create new node
+                    props["history"] = [{
+                        "timestamp": ts,
+                        "agent": agent_name,
+                        "action": "create_entity",
+                    }]
+                    conn.execute("""
+                        INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'agent')
+                    """, (node_id, label, json.dumps(props), ts, ts, ts, trust))
+                    created += 1
+                
+                # Log to decision ledger
+                conn.execute("""
+                    INSERT INTO Decision_Ledger (node_id, agent_name, action, rationale, timestamp)
+                    VALUES (?, ?, 'create_entity', ?, ?)
+                """, (node_id, agent_name, f"Created/updated entity {node_id}", ts))
+    
+    return {"created": created, "total": len(entities)}
+
+
+def batch_create_relations(db_path: str, relations: list, agent_name: str = "AI-Agent") -> dict:
+    """
+    Create multiple relations in a single transaction.
+    Returns count of created relations.
+    
+    relations: [{"from": "...", "to": "...", "relationType": "..."}, ...]
+    """
+    if not relations:
+        return {"created": 0}
+    
+    init_db(db_path)
+    ts = now_iso()
+    created = 0
+    
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            for rel in relations:
+                source_id = rel.get("from", "")
+                target_id = rel.get("to", "")
+                relation_type = rel.get("relationType", "RELATED_TO")
+                
+                if not source_id or not target_id:
+                    continue
+                
+                # Resolve canonical IDs
+                source_id = resolve_canonical_id(db_path, source_id)
+                target_id = resolve_canonical_id(db_path, target_id)
+                
+                # Ensure both nodes exist
+                for node_id in (source_id, target_id):
+                    conn.execute("""
+                        INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method)
+                        VALUES (?, 'Fact_Node', '{}', ?, ?, ?, 1.0, 'auto')
+                        ON CONFLICT(id) DO NOTHING
+                    """, (node_id, ts, ts, ts))
+                
+                # Create edge
+                conn.execute("""
+                    INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
+                    VALUES (?, ?, ?, '{}', ?, ?, 1.0, 'agent')
+                    ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+                        last_verified_at = excluded.last_verified_at
+                """, (source_id, target_id, relation_type, ts, ts))
+                created += 1
+                
+                # Log to decision ledger
+                conn.execute("""
+                    INSERT INTO Decision_Ledger (node_id, agent_name, action, rationale, timestamp)
+                    VALUES (?, ?, 'create_relation', ?, ?)
+                """, (source_id, agent_name, f"Created relation {source_id} -> {target_id}", ts))
+    
+    return {"created": created, "total": len(relations)}
+
+
+def batch_add_observations(db_path: str, observations: list, agent_name: str = "AI-Agent") -> dict:
+    """
+    Add multiple observations to nodes in a single transaction.
+    Returns count of nodes updated.
+    
+    observations: [{"entityName": "...", "contents": "..."}, ...]
+    """
+    if not observations:
+        return {"updated": 0}
+    
+    init_db(db_path)
+    ts = now_iso()
+    updated = 0
+    
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            for obs in observations:
+                node_id = obs.get("entityName", "")
+                content = obs.get("contents", "")
+                
+                if not node_id or not content:
+                    continue
+                
+                node_id = resolve_canonical_id(db_path, node_id)
+                
+                # Get existing properties
+                row = conn.execute(
+                    "SELECT properties FROM Nodes WHERE id = ? AND is_deleted = 0", (node_id,)
+                ).fetchone()
+                
+                if not row:
+                    continue
+                
+                props = json.loads(row[0]) if row[0] else {}
+                obs_list = props.get("observations", [])
+                if content not in obs_list:
+                    obs_list.append(content)
+                props["observations"] = obs_list
+                props["last_modified_by"] = agent_name
+                
+                # Update node
+                conn.execute("""
+                    UPDATE Nodes 
+                    SET properties = ?, updated_at = ?, last_verified_at = ?
+                    WHERE id = ?
+                """, (json.dumps(props), ts, ts, node_id))
+                updated += 1
+                
+                # Log to decision ledger
+                conn.execute("""
+                    INSERT INTO Decision_Ledger (node_id, agent_name, action, rationale, timestamp)
+                    VALUES (?, ?, 'add_observation', ?, ?)
+                """, (node_id, agent_name, f"Added observation: {content[:100]}", ts))
+    
+    return {"updated": updated, "total": len(observations)}

@@ -6,24 +6,42 @@ on:
       - "v*"
 
 jobs:
-  build:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Compile Python sources
+        run: python -m compileall -q graph_memory
+      - name: Run tests
+        run: python -m pytest -q
       - name: Build sdist and wheel
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install build
           python -m build
+      - name: Validate distribution with twine
+        run: |
+          python -m pip install twine
+          twine check dist/*
+      - name: Smoke test wheel
+        run: |
+          python -m venv test-env
+          test-env/bin/pip install dist/*.whl
+          test-env/bin/python -c "import graph_memory; print('Import OK')"
+          test-env/bin/graph-memory --help || true
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
   publish:
-    needs: build
+    needs: validate
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
