@@ -68,6 +68,7 @@ def create_http_app():
     from starlette.applications import Starlette
     from starlette.routing import Mount, Route
     from starlette.responses import JSONResponse
+    from starlette.middleware import Middleware
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager, TransportSecuritySettings
 
     # Reuse the single low-level Server instance (all 19 tools) from server.py.
@@ -109,7 +110,12 @@ def create_http_app():
         async with session_manager.run():
             yield
 
-    app = Starlette(
+    api_key = os.environ.get("GRAPH_MEMORY_API_KEY")
+    middleware = []
+    if api_key:
+        middleware.append(Middleware(APIKeyMiddleware, api_key=api_key))
+    
+    return Starlette(
         routes=[
             Route("/health", health),
             # Mounted at root so POST /mcp matches directly — a path-specific
@@ -117,14 +123,8 @@ def create_http_app():
             Mount("/", app=handle_mcp),
         ],
         lifespan=lifespan,
+        middleware=middleware,
     )
-    
-    # Add API key authentication if configured
-    api_key = os.environ.get("GRAPH_MEMORY_API_KEY")
-    if api_key:
-        app = APIKeyMiddleware(app, api_key)
-    
-    return app
 
 
 def main():
