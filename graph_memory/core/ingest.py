@@ -124,7 +124,13 @@ QUERY_MAP = {
 
 def load_parser(ext):
     """Dynamically loads tree-sitter language parser with multi-tier API fallbacks."""
-    import tree_sitter
+    try:
+        import tree_sitter
+    except ImportError:
+        raise ImportError(
+            "tree-sitter is required for AST ingestion but is not installed. "
+            "Install it with:  pip install 'epistemic-graph-memory[ast]'"
+        )
     package_name = PARSER_PACKAGES.get(ext)
     if not package_name:
         return None
@@ -380,7 +386,10 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
     if ext not in PARSER_PACKAGES:
         return {"status": "ignored", "message": f"Extension '{ext}' not supported for AST parsing."}
         
-    parser = load_parser(ext)
+    try:
+        parser = load_parser(ext)
+    except ImportError as e:
+        return {"status": "error", "message": str(e)}
     if not parser:
         return {"status": "error", "message": f"Parser for '{ext}' unavailable."}
         
@@ -583,7 +592,11 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
             continue
 
         if ext not in parsers:
-            parsers[ext] = load_parser(ext)
+            try:
+                parsers[ext] = load_parser(ext)
+            except ImportError as e:
+                print(f"[!] {e}")
+                return {"status": "error", "message": str(e)}
 
         parser = parsers[ext]
         if parser is None:

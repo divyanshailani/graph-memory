@@ -16,7 +16,7 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e . pytest
+          python -m pip install -e '.[all]' pytest
       - name: Compile Python sources
         run: python -m compileall -q graph_memory
       - name: Run tests
@@ -29,12 +29,19 @@ jobs:
         run: |
           python -m pip install twine
           twine check dist/*
-      - name: Smoke test wheel
+      - name: Smoke test wheel (stdlib-only install)
         run: |
           python -m venv test-env
           test-env/bin/pip install dist/*.whl
-          test-env/bin/python -c "import graph_memory; print('Import OK')"
-          test-env/bin/graph-memory --help || true
+          test-env/bin/python -c "import graph_memory; print('Import OK: core imports without mcp/tree-sitter')"
+          test-env/bin/graph-memory --help >/dev/null
+          echo "--- MCP entrypoint should degrade gracefully ---"
+          if test-env/bin/graph-memory-mcp 2>&1 | grep -q "optional 'mcp' extra"; then
+            echo "MCP install-hint OK"
+          else
+            echo "FAIL: MCP entrypoint did not print install hint"
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: dist

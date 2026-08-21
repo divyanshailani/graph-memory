@@ -56,11 +56,25 @@ All 19 MCP tools, a 28-command CLI, lifecycle hooks for 9 agent harnesses, and a
 python -m pip install 'epistemic-graph-memory[all]'
 ```
 
-The `[all]` extra installs Tree-sitter parsers for all 7 language variants plus the HTTP transport (uvicorn + starlette). If you only need Python:
+The core package is **stdlib-only** (SQLite, JSON, regex) and installs everywhere with zero compiled dependencies. Two optional extras add the heavy features:
+
+| Extra | Adds |
+|---|---|
+| *(none)* | Core graph, search, snapshot, Markdown/mem0 import, Obsidian export, reflection, hooks — **stdlib only** |
+| `[ast]` | Tree-sitter AST ingestion (Code understanding) |
+| `[mcp]` | MCP stdio transport |
+| `[http]` | MCP stdio + streamable HTTP transport (uvicorn + starlette) |
+| `[all]` | Everything |
 
 ```bash
-python -m pip install epistemic-graph-memory
+pip install epistemic-graph-memory                # core only, stdlib
+pip install 'epistemic-graph-memory[ast]'         # + code ingestion
+pip install 'epistemic-graph-memory[mcp]'         # + MCP stdio
+pip install 'epistemic-graph-memory[http]'        # + MCP over HTTP
+pip install 'epistemic-graph-memory[all]'         # + everything
 ```
+
+> **Android / Termux**: `[mcp]` pulls `pydantic` → `pydantic-core`, which has no Android wheel and tries to build Rust for a target rustup doesn't support — a multi-minute stall that ends in failure. `pip install epistemic-graph-memory` (core) finishes in seconds and gives you the graph, search, and Markdown import. AST and MCP need their extras and full toolchain support.
 
 ### MCP configuration
 
@@ -205,7 +219,7 @@ graph_memory/
 | CLI commands | 28 |
 | Agent harnesses | 9 |
 | AST languages | 7 variants (Python, TS, TSX, JS, JSX, Go, Rust) |
-| Dependencies | 4 runtime (mcp, tree-sitter + 2 parsers) |
+| Dependencies | 0 required (core is stdlib-only; MCP + AST are extras) |
 | External services | 0 |
 
 ---

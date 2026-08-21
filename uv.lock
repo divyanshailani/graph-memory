@@ -241,69 +241,87 @@ wheels = [
 
 [[package]]
 name = "epistemic-graph-memory"
-version = "3.8.0"
+version = "3.8.1"
 source = { editable = "." }
-dependencies = [
+
+[package.optional-dependencies]
+all = [
     { name = "mcp" },
+    { name = "starlette" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-go" },
+    { name = "tree-sitter-javascript" },
+    { name = "tree-sitter-python" },
+    { name = "tree-sitter-rust" },
+    { name = "tree-sitter-typescript" },
+    { name = "uvicorn" },
+]
+ast = [
     { name = "tree-sitter" },
     { name = "tree-sitter-javascript" },
     { name = "tree-sitter-python" },
     { name = "tree-sitter-typescript" },
 ]
-
-[package.optional-dependencies]
-all = [
-    { name = "starlette" },
-    { name = "tree-sitter-go" },
-    { name = "tree-sitter-javascript" },
-    { name = "tree-sitter-python" },
-    { name = "tree-sitter-rust" },
-    { name = "tree-sitter-typescript" },
-    { name = "uvicorn" },
-]
 go = [
+    { name = "tree-sitter" },
     { name = "tree-sitter-go" },
 ]
 http = [
+    { name = "mcp" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
 javascript = [
+    { name = "tree-sitter" },
     { name = "tree-sitter-javascript" },
 ]
+mcp = [
+    { name = "mcp" },
+]
 python = [
+    { name = "tree-sitter" },
     { name = "tree-sitter-python" },
 ]
 rust = [
+    { name = "tree-sitter" },
     { name = "tree-sitter-rust" },
 ]
 typescript = [
+    { name = "tree-sitter" },
     { name = "tree-sitter-typescript" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "mcp", specifier = ">=1.28,<2" },
+    { name = "mcp", marker = "extra == 'all'", specifier = ">=1.28,<2" },
+    { name = "mcp", marker = "extra == 'http'", specifier = ">=1.28,<2" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.28,<2" },
     { name = "starlette", marker = "extra == 'all'", specifier = ">=0.27.0" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.27.0" },
-    { name = "tree-sitter", specifier = ">=0.22.0" },
+    { name = "tree-sitter", marker = "extra == 'all'", specifier = ">=0.22.0" },
+    { name = "tree-sitter", marker = "extra == 'ast'", specifier = ">=0.22.0" },
+    { name = "tree-sitter", marker = "extra == 'go'", specifier = ">=0.22.0" },
+    { name = "tree-sitter", marker = "extra == 'javascript'", specifier = ">=0.22.0" },
+    { name = "tree-sitter", marker = "extra == 'python'", specifier = ">=0.22.0" },
+    { name = "tree-sitter", marker = "extra == 'rust'", specifier = ">=0.22.0" },
+    { name = "tree-sitter", marker = "extra == 'typescript'", specifier = ">=0.22.0" },
     { name = "tree-sitter-go", marker = "extra == 'all'" },
     { name = "tree-sitter-go", marker = "extra == 'go'" },
-    { name = "tree-sitter-javascript", specifier = ">=0.25.0" },
-    { name = "tree-sitter-javascript", marker = "extra == 'all'" },
-    { name = "tree-sitter-javascript", marker = "extra == 'javascript'" },
-    { name = "tree-sitter-python", specifier = ">=0.25.0" },
-    { name = "tree-sitter-python", marker = "extra == 'all'" },
-    { name = "tree-sitter-python", marker = "extra == 'python'" },
+    { name = "tree-sitter-javascript", marker = "extra == 'all'", specifier = ">=0.25.0" },
+    { name = "tree-sitter-javascript", marker = "extra == 'ast'", specifier = ">=0.25.0" },
+    { name = "tree-sitter-javascript", marker = "extra == 'javascript'", specifier = ">=0.25.0" },
+    { name = "tree-sitter-python", marker = "extra == 'all'", specifier = ">=0.25.0" },
+    { name = "tree-sitter-python", marker = "extra == 'ast'", specifier = ">=0.25.0" },
+    { name = "tree-sitter-python", marker = "extra == 'python'", specifier = ">=0.25.0" },
     { name = "tree-sitter-rust", marker = "extra == 'all'" },
     { name = "tree-sitter-rust", marker = "extra == 'rust'" },
-    { name = "tree-sitter-typescript", specifier = ">=0.23.2" },
-    { name = "tree-sitter-typescript", marker = "extra == 'all'" },
-    { name = "tree-sitter-typescript", marker = "extra == 'typescript'" },
+    { name = "tree-sitter-typescript", marker = "extra == 'all'", specifier = ">=0.23.2" },
+    { name = "tree-sitter-typescript", marker = "extra == 'ast'", specifier = ">=0.23.2" },
+    { name = "tree-sitter-typescript", marker = "extra == 'typescript'", specifier = ">=0.23.2" },
     { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.23.0" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.23.0" },
 ]
-provides-extras = ["python", "typescript", "javascript", "go", "rust", "http", "all"]
+provides-extras = ["mcp", "ast", "python", "typescript", "javascript", "go", "rust", "http", "all"]
 
 [[package]]
 name = "exceptiongroup"

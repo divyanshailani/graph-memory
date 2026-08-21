@@ -1,5 +1,10 @@
 # Changelog
 
+## [v3.8.1] - 2026-08-22
+- **Stdlib-only core (Android/Termux fix)**: `mcp` and `tree-sitter` moved out of required dependencies into optional extras. The core package (`graph-memory`, search, snapshot, Markdown/mem0 import, Obsidian export, reflection, hooks) now installs anywhere with zero compiled dependencies — fixing the multi-minute `pydantic-core` Rust build stall on Android where the target triple is unsupported. New extras: `[mcp]`, `[ast]`, plus per-language `[python]`/`[typescript]`/`[javascript]`/`[go]`/`[rust]` now correctly include the `tree-sitter` core package. `[http]` now pulls `mcp` explicitly.
+- **Graceful degradation**: MCP entrypoints (`graph-memory-mcp`, `graph-memory-mcp-http`) print a one-line install hint instead of an `ImportError` traceback when their extra is missing. AST ingestion returns a clear error when `tree-sitter` is absent.
+- **CI**: test + publish workflows install the `[all]` extra; the publish smoke test now verifies the stdlib-only wheel installs and that MCP degrades gracefully.
+
 ## [v3.8.0] - 2026-08-19
 - **MCP Dependency Fix**: Pinned `mcp>=1.28,<2` to prevent incompatibility with MCP 2.x (fixes clean install failures)
 - **HTTP Transport Security**: Added DNS rebinding protection, optional API key authentication via `GRAPH_MEMORY_API_KEY`, and security warnings for remote deployment
