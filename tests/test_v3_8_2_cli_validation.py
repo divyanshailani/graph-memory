@@ -16,12 +16,12 @@ def _run_cli(*argv):
 
 
 def test_dunder_version_matches_pyproject():
-    import tomllib
+    # regex instead of tomllib: tomllib is 3.11+ and this project supports 3.10
+    import re
     from pathlib import Path
 
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    with open(pyproject, "rb") as f:
-        declared = tomllib.load(f)["project"]["version"]
+    declared = re.search(r'^version\s*=\s*"([^"]+)"', pyproject.read_text(), re.M).group(1)
     assert __version__ == declared
 
 
