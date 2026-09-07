@@ -213,8 +213,8 @@ graph_memory/
 
 | Metric | Value |
 |---|---|
-| Source code | 5,069 lines Python |
-| Test code | 1,672 lines, 57 tests |
+| Source code | 5,436 lines Python |
+| Test code | 1,674 lines, 57 tests |
 | MCP tools | 19 |
 | CLI commands | 28 |
 | Agent harnesses | 9 |

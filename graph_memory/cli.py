@@ -4,11 +4,13 @@ import json
 import os
 import glob
 
+from graph_memory import __version__
 from graph_memory.core import engine
 from graph_memory.core.ingest import ingest_codebase
 
 def main():
     parser = argparse.ArgumentParser(description="Graph-Memory CLI Tool")
+    parser.add_argument("--version", action="version", version=f"graph-memory {__version__}")
     parser.add_argument("--db", type=str, help="Path to the SQLite database (defaults to workspace/.agents/graph_memory.sqlite)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -157,18 +159,29 @@ def main():
             print(f"Node '{args.node_id}' soft-deleted successfully.")
 
         elif args.command == "add_node":
-            props = json.loads(args.properties)
+            node_id = args.node_id.strip()
+            label = args.label.strip()
+            if not node_id:
+                sys.exit("Error: node_id must not be empty or whitespace.")
+            if not label:
+                sys.exit("Error: label must not be empty or whitespace.")
+            try:
+                props = json.loads(args.properties)
+            except json.JSONDecodeError as e:
+                sys.exit(f"Error: properties is not valid JSON: {e}")
+            if not isinstance(props, dict):
+                sys.exit("Error: properties must be a JSON object (e.g. '{\"type\": \"note\"}').")
             engine.get_or_create_node(
-                db_path, 
-                args.node_id, 
-                args.label, 
-                props, 
+                db_path,
+                node_id,
+                label,
+                props,
                 trust_score=args.trust,
                 verification_method=args.method,
                 link_to=args.link_to,
                 link_type=args.link_type
             )
-            print(f"Node '{args.node_id}' added/updated successfully.")
+            print(f"Node '{node_id}' added/updated successfully.")
 
         elif args.command == "add_relation":
             props = json.loads(args.properties)

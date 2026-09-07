@@ -1,5 +1,12 @@
 # Changelog
 
+## [v3.8.2] - 2026-09-07
+- **Version Visibility**: `graph_memory.__version__` exposed and `graph-memory --version` prints it (e.g. `graph-memory 3.8.2`). Previously the version lived only in `pyproject.toml`.
+- **`add_node` Input Validation**: Empty/whitespace `node_id` or `label`, malformed JSON, and non-object properties are rejected with clear errors before touching the graph. Previously any typo (e.g. a stray `add_node ok x`) became a permanent node.
+- **CI**: Python 3.14 added to the test matrix (3.10–3.14).
+- **Docs**: README Numbers table updated to actual counts (5,436 source lines, 1,674 test lines, 64 tests).
+- **Tests**: 64 passing. Added `tests/test_v3_8_2_cli_validation.py`.
+
 ## [v3.8.1] - 2026-08-22
 - **Stdlib-only core (Android/Termux fix)**: `mcp` and `tree-sitter` moved out of required dependencies into optional extras. The core package (`graph-memory`, search, snapshot, Markdown/mem0 import, Obsidian export, reflection, hooks) now installs anywhere with zero compiled dependencies — fixing the multi-minute `pydantic-core` Rust build stall on Android where the target triple is unsupported. New extras: `[mcp]`, `[ast]`, plus per-language `[python]`/`[typescript]`/`[javascript]`/`[go]`/`[rust]` now correctly include the `tree-sitter` core package. `[http]` now pulls `mcp` explicitly.
 - **Graceful degradation**: MCP entrypoints (`graph-memory-mcp`, `graph-memory-mcp-http`) print a one-line install hint instead of an `ImportError` traceback when their extra is missing. AST ingestion returns a clear error when `tree-sitter` is absent.
