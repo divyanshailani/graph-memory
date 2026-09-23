@@ -16,7 +16,7 @@
 <p align="center">
   <a href="https://pypi.org/project/epistemic-graph-memory/"><img src="https://img.shields.io/pypi/v/epistemic-graph-memory?color=blue" alt="PyPI"></a>
   <a href="https://github.com/divyanshailani/graph-memory/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
-  <img src="https://img.shields.io/badge/tests-57%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-66%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Python-3.10+-blue" alt="Python">
 </p>
 
@@ -40,7 +40,7 @@ All 19 MCP tools, a 28-command CLI, lifecycle hooks for 9 agent harnesses, and a
 
 **Agent memory.** Every decision an agent makes — what it changed, why, when — goes into an append-only `Decision_Ledger`. A reflection engine digests the last 30 days of real decisions into structured memory cards. When two agents disagree about a fact (different values for the same field), the contradiction is recorded and surfaced — no silent overwrites.
 
-**Trust decay.** Facts decay over time with `effective = base × 0.5^(days/30)`. Re-verifying a fact resets it to 100%. Stale, unreferenced nodes get garbage-collected. This means the graph self-maintains — old assumptions fade, recent verifications stay sharp.
+**Trust decay.** Facts decay over time with `effective = base × 0.5^(days/30)`. Re-verifying a fact resets it to 100%. Derived facts re-verify themselves: if the source file is byte-identical to the hash recorded at ingest, the signature and call edges extracted from it are still true, so the lifecycle hooks refresh those nodes with no agent effort — and a node that owns no file (call stub, import target, MOC, project root) is refreshed only when everything feeding it is fresh, so an edited file correctly keeps its dependents decayed. Stale, unreferenced nodes get garbage-collected. This means the graph self-maintains — old assumptions fade, recent verifications stay sharp.
 
 **Prompt injection.** `graph-memory snapshot` produces a deterministic, content-fingerprinted Markdown snapshot. If nothing changed, you get the exact same bytes — so Claude's prompt cache, Cursor's context cache, whatever — stays warm. Zero wasted tokens on unchanged context.
 
@@ -213,8 +213,8 @@ graph_memory/
 
 | Metric | Value |
 |---|---|
-| Source code | 5,436 lines Python |
-| Test code | 1,674 lines, 57 tests |
+| Source code | 5,582 lines Python |
+| Test code | 1,879 lines, 66 tests |
 | MCP tools | 19 |
 | CLI commands | 28 |
 | Agent harnesses | 9 |

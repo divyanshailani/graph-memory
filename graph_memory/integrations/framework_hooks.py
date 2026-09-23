@@ -691,6 +691,14 @@ def refresh_installed_snapshots(db_path=None) -> list:
     Called by the SessionStart/Stop lifecycle hooks so injected memory never goes stale.
     """
     actual_db = db_path or get_db_path()
+
+    # Derived facts whose source file is unchanged are still true: re-verify them
+    # before rendering, so an idle graph never decays out of its own injected memory.
+    try:
+        engine.reverify_hash_stable_nodes(actual_db)
+    except Exception as e:
+        print(f"[graph-memory] hash-stable re-verification failed: {e}", file=sys.stderr)
+
     refreshed = []
 
     def _read_path(entry):

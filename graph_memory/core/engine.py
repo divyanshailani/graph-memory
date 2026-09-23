@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import os
+import hashlib
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 
@@ -411,6 +412,11 @@ def search_nodes(db_path: str, query: str, min_trust: float = 0.6, half_life_day
 
 MAX_NODE_HISTORY = 10  # retained entries per node; older mechanical entries are pruned on upsert
 
+# Inbound-evidence propagation depth for reverify_hash_stable_nodes(): each pass
+# advances one derivation layer (file -> component -> call stub -> ...). Chains are
+# short; the cap only guards against pathological graphs.
+MAX_VERIFICATION_PASSES = 20
+
 def get_or_create_node(
     db_path: str, 
     node_id: str, 
@@ -722,6 +728,125 @@ def prune_stale_nodes(db_path: str, days: int = 45, min_trust: float = 0.2, half
                         (now_iso(), *chunk),
                     )
     return len(doomed)
+
+def reverify_hash_stable_nodes(db_path: str) -> dict:
+    """
+    Mechanically re-verifies derived facts whose source file is byte-identical to the
+    hash recorded at ingest time.
+
+    AST nodes are derived, not asserted: if the file has not changed since the parse,
+    the signature, docstring and call edges extracted from it are still true, so the
+    fact can be re-verified with no agent, no test run and no human. Files whose content
+    changed are left to the incremental ingester.
+
+    Derived facts that own no file (call stubs, import targets, directory MOCs, the
+    project root) are verified by evidence instead: a node is re-verified when every
+    derived node feeding it is itself verified. Agent-authored nodes are never verified
+    here — a curated card, a release node or a distilled fact is an assertion, and
+    nothing on disk proves it. Inbound edges from those nodes are not evidence for a
+    derivation, so a knowledge card attached to the project root cannot freeze it.
+
+    Writes only trust_score / last_verified_at / verification_method, so node payloads —
+    and the prompt-stable snapshot rendered from them — do not churn. No Decision_Ledger
+    rows: mechanical re-verification is not an agent decision (same signal isolation as
+    the v3.4.1 AST-upsert fix).
+    """
+    init_db(db_path)
+    stats = {
+        "files_checked": 0,
+        "files_stable": 0,
+        "files_changed": 0,
+        "files_missing": 0,
+        "nodes_reverified": 0,
+        "nodes_propagated": 0,
+    }
+
+    with get_connection(db_path) as conn:
+        derived = {}
+        file_meta = {}
+        for node_id, entity_type, rel_path, file_path, abs_path, stored_hash in conn.execute("""
+            SELECT id,
+                   json_extract(properties, '$.entity_type'),
+                   json_extract(properties, '$.path'),
+                   json_extract(properties, '$.file_path'),
+                   json_extract(properties, '$.abs_path'),
+                   json_extract(properties, '$.file_hash')
+            FROM Nodes
+            WHERE is_deleted = 0 AND json_extract(properties, '$.entity_type') IN
+                  ('File', 'Component', 'External_Dependency', 'MOC_Hub', 'Project')
+        """).fetchall():
+            derived[node_id] = (entity_type, file_path or rel_path)
+            if entity_type == "File":
+                file_meta[node_id] = (rel_path, abs_path, stored_hash)
+
+        stable_paths = set()
+        verified = []
+        for node_id, (rel_path, abs_path, stored_hash) in file_meta.items():
+            if not (rel_path and abs_path and stored_hash):
+                continue
+            stats["files_checked"] += 1
+            try:
+                with open(abs_path, "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                stats["files_missing"] += 1
+                continue
+            if digest != stored_hash:
+                stats["files_changed"] += 1
+                continue
+            stats["files_stable"] += 1
+            stable_paths.add(rel_path)
+            verified.append(node_id)
+
+        if not stable_paths:
+            return stats
+
+        # Components whose own file did not change are directly verified.
+        for node_id, (entity_type, rel_path) in derived.items():
+            if entity_type != "File" and rel_path in stable_paths:
+                verified.append(node_id)
+
+        verified = set(verified)
+        stats["nodes_reverified"] = len(verified)
+
+        # Fixed point over inbound evidence: stubs, dependency targets, MOCs and roots
+        # carry no file of their own; every derived input that feeds them must be verified.
+        candidate_ids = {node_id: rel_path for node_id, (_, rel_path) in derived.items()}
+        if len(candidate_ids) > len(verified):
+            evidence = {node_id: set() for node_id in candidate_ids}
+            for source_id, target_id in conn.execute(
+                "SELECT source_id, target_id FROM Edges"
+            ).fetchall():
+                if target_id in evidence and source_id in candidate_ids:
+                    evidence[target_id].add(source_id)
+
+            pending = [n for n in candidate_ids if n not in verified]
+            for _ in range(MAX_VERIFICATION_PASSES):
+                newly = [
+                    node_id for node_id in pending
+                    if evidence[node_id] and evidence[node_id] <= verified
+                ]
+                if not newly:
+                    break
+                verified.update(newly)
+                pending = [n for n in pending if n not in verified]
+            stats["nodes_propagated"] = len(verified) - stats["nodes_reverified"]
+            stats["nodes_reverified"] = len(verified)
+
+        targets = sorted(verified)
+        timestamp = now_iso()
+        with write_transaction(conn):
+            for i in range(0, len(targets), 500):
+                chunk = targets[i:i + 500]
+                placeholders = ",".join("?" * len(chunk))
+                conn.execute(
+                    f"UPDATE Nodes SET trust_score = 1.0, last_verified_at = ?, "
+                    f"verification_method = 'hash_stable' "
+                    f"WHERE id IN ({placeholders})",
+                    (timestamp, *chunk),
+                )
+
+    return stats
 
 def create_relation(
     db_path: str, 

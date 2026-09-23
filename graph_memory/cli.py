@@ -116,6 +116,7 @@ def main():
     snapshot_parser = subparsers.add_parser("snapshot", help="Generate prompt-cache friendly Markdown snapshot of active high-trust memory")
     snapshot_parser.add_argument("--max-tokens", type=int, default=600, help="Max tokens limit budget (default: 600)")
     snapshot_parser.add_argument("--min-trust", type=float, default=0.7, help="Minimum effective trust threshold (default: 0.7)")
+    snapshot_parser.add_argument("--reverify", action="store_true", help="Re-verify AST-derived facts whose source file is unchanged before rendering")
 
     # Wiki
     wiki_parser = subparsers.add_parser("wiki", help="Generate hierarchical Markdown Repo Wiki matching Qoder schema")
@@ -276,6 +277,8 @@ def main():
 
         elif args.command == "snapshot":
             from graph_memory.core.snapshot import generate_active_snapshot
+            if args.reverify:
+                engine.reverify_hash_stable_nodes(db_path)
             snap = generate_active_snapshot(db_path, max_tokens=args.max_tokens, min_trust=args.min_trust)
             print(snap)
 
