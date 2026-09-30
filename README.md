@@ -184,6 +184,13 @@ graph-memory export-3d graph_3d.html
 | `merge_entities` | Merge entities with canonical pointer redirect |
 | `open_nodes` | Serialize subgraphs around specific nodes |
 | `read_graph` | Serialize the complete knowledge graph |
+| `add_observations` | Append observations to entities without touching their facts |
+| `delete_entities` | Remove entities and all incident relations |
+| `delete_observations` | Remove specific observations from entities |
+| `delete_relations` | Remove relations by endpoint triple |
+| `generate_repo_wiki` | Hierarchical Markdown repo wiki (Qoder schema) |
+| `get_knowledge_cards` | Domain knowledge cards across 8 software domains |
+| `reflect_session_memory` | Digest the decision ledger into persistent memory cards |
 
 ---
 
