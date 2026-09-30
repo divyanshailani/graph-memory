@@ -11,6 +11,7 @@ touch real harness configuration files.
 """
 import json
 import sys
+from pathlib import Path
 
 import graph_memory.integrations.framework_hooks as fh
 from graph_memory.core import engine, lifecycle
