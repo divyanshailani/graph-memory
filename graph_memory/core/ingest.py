@@ -4,6 +4,7 @@ import sys
 import json
 import importlib
 import hashlib
+import posixpath
 from pathlib import Path
 from graph_memory.core.engine import get_or_create_node, create_relation as add_relation, get_connection, write_transaction, resolve_canonical_id, now_iso, init_db, bulk_upsert_nodes
 
@@ -214,16 +215,25 @@ def extract_calls_and_inheritance(node, ext, entities, current_scope="", content
     elif node_type in qmap.get("call_nodes", set()):
         func_node = node.child_by_field_name("function")
         call_name = None
+        receiver = None
         if func_node:
             if func_node.type == "identifier":
                 call_name = func_node.text.decode('utf8')
-            elif func_node.type in ("attribute", "member_expression"):
-                attr_node = func_node.child_by_field_name("attribute") or func_node.child_by_field_name("property")
+            elif func_node.type in ("attribute", "member_expression", "field_expression"):
+                attr_node = (func_node.child_by_field_name("attribute")
+                             or func_node.child_by_field_name("property")
+                             or func_node.child_by_field_name("field"))
+                recv_node = (func_node.child_by_field_name("object")
+                             or func_node.child_by_field_name("receiver"))
                 if attr_node:
                     call_name = attr_node.text.decode('utf8')
-                    
+                if recv_node is not None:
+                    # Receiver text drives cross-file import resolution; cap it
+                    # so huge member expressions never bloat the edge payload.
+                    receiver = recv_node.text.decode('utf8', 'ignore')[:64]
+
         if call_name and current_scope:
-            entities["calls"].append({"caller": current_scope, "callee": call_name})
+            entities["calls"].append({"caller": current_scope, "callee": call_name, "receiver": receiver})
 
     new_scope = current_scope
     if node_type in qmap["function_nodes"]:
@@ -340,11 +350,37 @@ def _find_project_root(start: Path) -> Path:
             return candidate
     return current
 
+PROJECT_ID_FILE = os.path.join(".agents", "project_id")
+
 def project_namespace(root: Path) -> str:
-    """Stable per-project namespace: sanitized root name + 6-char hash of the resolved absolute path."""
-    digest = hashlib.sha1(str(Path(root).resolve()).encode("utf-8")).hexdigest()[:6]
-    clean_name = re.sub(r"[^A-Za-z0-9]", "_", Path(root).name).strip("_") or "project"
-    return f"{clean_name}_{digest}"
+    """Stable per-project namespace: sanitized root name + 6-char identity token.
+
+    v3.9.0: the whole namespace string prefers a committed `.agents/project_id`
+    file. A repo that is moved, cloned, or checked out at a second path — even
+    under a different directory name — keeps the namespace its nodes were keyed
+    with, so the store survives relocation instead of forcing a full re-ingest.
+    First use creates the file (gitignored by the default template — commit it
+    to make the identity portable). Without it the token falls back to the
+    6-char sha1 of the resolved absolute path, matching every namespace minted
+    before v3.9.0.
+    """
+    root = Path(root).resolve()
+    id_file = root / PROJECT_ID_FILE
+    try:
+        stored = id_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        stored = ""
+    if stored:
+        return stored
+    digest = hashlib.sha1(str(root).encode("utf-8")).hexdigest()[:6]
+    clean_name = re.sub(r"[^A-Za-z0-9]", "_", root.name).strip("_") or "project"
+    namespace = f"{clean_name}_{digest}"
+    try:
+        id_file.parent.mkdir(parents=True, exist_ok=True)
+        id_file.write_text(namespace + "\n", encoding="utf-8")
+    except OSError:
+        pass  # read-only checkout: path-hash namespace still works, just not portable
+    return namespace
 
 def sanitize_import_module(module: str, ext: str):
     """
@@ -361,6 +397,206 @@ def sanitize_import_module(module: str, ext: str):
         return None
     clean = clean.strip(";").strip()
     return clean or None
+
+JS_IMPORT_RE = re.compile(
+    r"""import\s+(?:[\w$]+\s+from\s+)?['"]([^'"]+)['"]"""
+    r"""|export\s+(?:\*|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]"""
+    r"""|\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)"""
+)
+
+def _walk_import_nodes(node, types, out, level=0):
+    if level > 100:
+        return
+    if node.type in types:
+        out.append(node)
+    for child in node.children:
+        _walk_import_nodes(child, types, out, level + 1)
+
+
+def _text(node, content):
+    return node.text.decode("utf-8", "ignore") if node is not None else ""
+
+
+def _py_bindings(root, content):
+    """Python: {local_name: {"module": dotted origin, "level": relative depth, "orig": imported name}}.
+
+    `import a.b as c`        -> c -> module a.b   (orig a.b)
+    `import a.b`             -> a -> module a     (only the first segment binds)
+    `from .x import y`       -> y -> module x, level 1   (`from . import y` -> module "", level 1)
+    `from a.b import c as d` -> d -> module a.b.c, level 0
+    `from a.b import c`      -> c -> module a.b, level 0
+    `from m import x.y`      -> x -> module m, orig x.y  (only x binds)
+    """
+    bindings = {}
+    nodes = []
+    _walk_import_nodes(root, {"import_statement", "import_from_statement"}, nodes)
+    for node in nodes:
+        children = node.children
+        # Anonymous keyword nodes appear in children; the module precedes
+        # `import`, the bound names follow it.
+        kw = next((i for i, c in enumerate(children) if c.type == "import"), len(children))
+
+        if node.type == "import_statement":
+            for child in children:
+                if child.type == "dotted_name":
+                    seg = _text(child, content).split(".")[0]
+                    bindings[seg] = {"module": seg, "level": 0, "orig": seg}
+                elif child.type == "aliased_import":
+                    name_n = child.child_by_field_name("name")
+                    alias_n = child.child_by_field_name("alias")
+                    if name_n is None:
+                        continue
+                    orig = _text(name_n, content)
+                    local = _text(alias_n, content) if alias_n is not None else orig.split(".")[0]
+                    bindings[local] = {"module": orig, "level": 0, "orig": orig}
+            continue
+
+        module = ""
+        level = 0
+        for child in children[:kw]:
+            if child.type == "dotted_name":
+                module = _text(child, content)
+            elif child.type == "relative_import":
+                for g in child.children:
+                    # Newer grammars nest the dots in an import_prefix node.
+                    for t in (g.children if g.type == "import_prefix" else (g,)):
+                        if t.type == ".":
+                            level += 1
+                        elif t.type == "ellipsis":
+                            level += 3
+                        elif t.type in ("dotted_name", "identifier"):
+                            module = _text(t, content)
+
+        for child in children[kw + 1:]:
+            names = []
+            if child.type == "dotted_name":
+                names = [(_text(child, content), None)]
+            elif child.type == "aliased_import":
+                nm = child.child_by_field_name("name")
+                al = child.child_by_field_name("alias")
+                if nm is not None:
+                    names.append((_text(nm, content), _text(al, content) if al is not None else None))
+            elif child.type == "parenthesized_expression":
+                for item in child.children:
+                    if item.type == "dotted_name":
+                        names += [(s, None) for s in _text(item, content).split(".")]
+                    elif item.type == "identifier":
+                        names.append((_text(item, content), None))
+                    elif item.type == "aliased_import":
+                        nm = item.child_by_field_name("name")
+                        al = item.child_by_field_name("alias")
+                        if nm is not None:
+                            names.append((_text(nm, content), _text(al, content) if al is not None else None))
+            # wildcard_import and keywords bind nothing.
+            for orig, alias in names:
+                local = alias or orig.split(".")[0]
+                if not local or local == "*":
+                    continue
+                if alias:
+                    full = f"{module}.{orig}" if module else orig
+                    bindings[local] = {"module": full, "level": level, "orig": orig.split(".")[0]}
+                else:
+                    bindings[local] = {"module": module, "level": level, "orig": orig}
+    return bindings
+
+
+def _ts_bindings(content, bindings):
+    """JS/TS: regex over raw text — module specifier plus per-name aliases.
+    `import x from 'm'`, `import {a as b} from 'm'`, `import * as ns from 'm'`,
+    `const x = require('m')`, `export ... from 'm'`."""
+    for m in JS_IMPORT_RE.finditer(content):
+        src = m.group(1) or m.group(2) or m.group(3)
+        stmt = content[max(0, m.start() - 400):m.end()]
+        brace = re.search(r"\{([^}]*)\}", stmt)
+        seen_names = False
+        if brace:
+            for part in brace.group(1).split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                am = re.match(r"(?:default\s+)?[\w$]+(?:\s+as\s+([\w$]+))?$", part)
+                if am:
+                    local = am.group(1) or part.split()[0]
+                    bindings[local] = {"module": src, "level": 0, "orig": part.split()[0]}
+                    seen_names = True
+        ns = re.search(r"import\s+\*\s+as\s+([\w$]+)", stmt)
+        if ns:
+            bindings[ns.group(1)] = {"module": src, "level": 0, "orig": "*"}
+            seen_names = True
+        top = re.match(r"\s*import\s+([\w$]+)\s+from", stmt)
+        if top:
+            bindings[top.group(1)] = {"module": src, "level": 0, "orig": "default"}
+            seen_names = True
+        rq = re.search(r"(?:const|let|var)\s+([\w$]+)\s*=\s*require", stmt)
+        if rq:
+            bindings[rq.group(1)] = {"module": src, "level": 0, "orig": "*"}
+            seen_names = True
+        if not seen_names and src:
+            bindings.setdefault(f"__module__:{src}", {"module": src, "level": 0, "orig": "*"})
+
+
+def _go_bindings(root, content):
+    """Go: import_spec / import_spec_list; default local = final package-path segment."""
+    bindings = {}
+    nodes = []
+    _walk_import_nodes(root, {"import_spec"}, nodes)
+    for node in nodes:
+        path_n = node.child_by_field_name("path")
+        if path_n is None:
+            continue
+        src = _text(path_n, content).strip('"')
+        name_n = node.child_by_field_name("name")
+        local = _text(name_n, content).strip("_") if name_n is not None and _text(name_n, content) not in (".", "_") else ""
+        if not local:
+            local = src.rsplit("/", 1)[-1]
+        if local:
+            bindings[local] = {"module": src, "level": 0, "orig": local}
+    return bindings
+
+
+def _rs_bindings(content, bindings):
+    """Rust: `use a::b::{c, d as e};` — regex; local = last segment / alias; `self::x` is relative."""
+    for m in re.finditer(r"use\s+(?:pub\s+)?([^;]+);", content):
+        body = m.group(1)
+        outer = body.split("::", 1)[0] if "{" not in body else body.split("::{", 1)[0]
+        level = 1 if outer in ("crate", "super", "self") else 0
+        base = body
+        names = [body.rsplit("::", 1)[-1]]
+        group = re.search(r"\{([^}]*)\}", body)
+        if group:
+            names = [p.strip() for p in group.group(1).split(",") if p.strip()]
+            base = body[:group.start()].rstrip(":")
+            level = 1 if base.split("::", 1)[0] in ("crate", "super", "self") else level
+        for entry in names:
+            am = re.match(r"([\w]+)(?:\s+as\s+(\w+))?$", entry)
+            if not am:
+                continue
+            orig = am.group(1)
+            local = am.group(2) or (orig if orig != "self" else base.rsplit("::", 1)[-1])
+            bindings[local] = {"module": base, "level": level, "orig": orig}
+
+
+def _collect_import_bindings(root, ext, content):
+    """Per-file import bindings used by cross-file call resolution (v3.9.0).
+    Stored on File nodes as properties.bindings; keys are bound local names
+    (plus `__module__:<src>` markers for nameless JS side-effect imports)."""
+    text = content.decode("utf-8", "ignore")
+    bindings = {}
+    try:
+        if ext == ".py":
+            bindings.update(_py_bindings(root, text))
+        elif ext in (".ts", ".tsx", ".js", ".jsx"):
+            _ts_bindings(text, bindings)
+        elif ext == ".go":
+            bindings.update(_go_bindings(root, text))
+        elif ext == ".rs":
+            bindings.update(_rs_bindings(text, bindings))
+    except Exception:
+        return {}  # binding extraction must never break ingestion
+    # Cap payload size: a file with pathological binding counts is truncated.
+    if len(bindings) > 400:
+        bindings = dict(list(bindings.items())[:400])
+    return bindings
 
 def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", rationale: str = "Single file incremental AST update", root: str = None) -> dict:
     """
@@ -428,6 +664,7 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
     pre_sweep_file_imports(db_path, file_id)  # Delete old IMPORTS edges
     
     mtime = path.stat().st_mtime
+    bindings = _collect_import_bindings(tree.root_node, ext, content)
     
     add_node(
         db_path, 
@@ -440,6 +677,7 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
             "project_root": str(project_root),
             "file_hash": file_hash, 
             "mtime": mtime,
+            "bindings": bindings,
             "source": "AST"
         }, 
         trust_score=1.0, 
@@ -508,11 +746,21 @@ def ingest_file(db_path: str, file_path: str, agent_name: str = "Tree-sitter", r
         add_node(db_path, super_cls, "Fact_Node", {"entity_type": "Component", "name": ext_data['super_class'], "component_type": "class", "source": "AST_Inheritance"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
         add_relation(db_path, sub_cls, super_cls, "EXTENDS", trust_score=1.0, verification_method="source_parse")
         
+    # One stub + one edge per unique callee name per file: repeated calls to the
+    # same function collapse, and their receiver expressions merge into the
+    # CALLS edge's "receivers" property (cross-file resolution input, v3.9.0).
+    recv_by_callee = {}
+    callers_by_callee = {}
     for call_data in entities["calls"]:
-        caller_id = f"Func_{call_data['caller']}_{ns}/{rel_posix}"
-        callee_id = f"Func_{call_data['callee']}_{ns}/{rel_posix}"
-        add_node(db_path, callee_id, "Fact_Node", {"entity_type": "Component", "name": call_data['callee'], "component_type": "function", "source": "AST_Call"}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
-        add_relation(db_path, caller_id, callee_id, "CALLS", trust_score=1.0, verification_method="source_parse")
+        recv_by_callee.setdefault(call_data["callee"], set()).add(call_data.get("receiver"))
+        callers_by_callee.setdefault(call_data["callee"], set()).add(
+            f"Func_{call_data['caller']}_{ns}/{rel_posix}")
+    for callee_name, receivers in recv_by_callee.items():
+        callee_id = f"Func_{callee_name}_{ns}/{rel_posix}"
+        recv_list = sorted(r for r in receivers if r)
+        add_node(db_path, callee_id, "Fact_Node", {"entity_type": "Component", "name": callee_name, "component_type": "function", "source": "AST_Call", "receivers": recv_list}, trust_score=0.8, verification_method="source_parse", agent_name=agent_name, rationale=rationale)
+        for caller_id in callers_by_callee[callee_name]:
+            add_relation(db_path, caller_id, callee_id, "CALLS", props={"receivers": recv_list}, trust_score=1.0, verification_method="source_parse")
     
     # Process imports (create IMPORTS edges to Dependency nodes)
     for imp in set(entities["imports"]):
@@ -626,6 +874,7 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
             created_mocs.add(moc_id)
 
         pre_sweep_file_components(db_path, file_id)
+        pre_sweep_file_edges(db_path, file_id)  # Drop old CALLS/EXTENDS so receiver props can't go stale
 
         mtime = path.stat().st_mtime
 
@@ -638,6 +887,7 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
                 "project_root": str(directory),
                 "file_hash": file_hash,
                 "mtime": mtime,
+                "bindings": _collect_import_bindings(tree.root_node, ext, content),
                 "created_by": agent_name,
                 "source": "AST",
                 "confidence": 1.0,
@@ -691,13 +941,15 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
                 "trust_score": 1.0, "verification_method": "source_parse",
                 "link_to": file_id, "link_type": "DEFINED_IN",
             }
-
-        def _stub(spec_id, name, kind):
+        def _stub(spec_id, name, kind, receivers=None):
             # setdefault: a full definition spec already in the batch always wins
             # over a same-file stub, so source stays "AST".
+            props = {"entity_type": "Component", "name": name, "component_type": kind, "source": "AST_Inheritance" if kind == "class" else "AST_Call"}
+            if receivers is not None:
+                props["receivers"] = receivers
             batch_nodes.setdefault(spec_id, {
                 "id": spec_id, "label": "Fact_Node",
-                "properties": {"entity_type": "Component", "name": name, "component_type": kind, "source": "AST_Inheritance" if kind == "class" else "AST_Call"},
+                "properties": props,
                 "trust_score": 0.8, "verification_method": "source_parse",
             })
 
@@ -708,12 +960,24 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
             _stub(super_cls, ext_data["super_class"], "class")
             batch_edges.append({"source_id": sub_cls, "target_id": super_cls, "relation_type": "EXTENDS", "trust_score": 1.0, "verification_method": "source_parse"})
 
+        # Unique callees only: one stub per (callee, file), receiver sets merged.
+        # pre_sweep_file_edges has already dropped this file's CALLS edges, so a
+        # callee whose receivers were all removed lands with receivers: [].
+        recv_sets = {}
+        for call_data in entities["calls"]:
+            recv_sets.setdefault(call_data["callee"], set()).add(call_data.get("receiver"))
+        for callee_name, receivers in recv_sets.items():
+            callee_id = f"Func_{callee_name}_{ns}/{rel_posix}"
+            _stub(callee_id, callee_name, "function", receivers=sorted(r for r in receivers if r))
         for call_data in entities["calls"]:
             caller_id = f"Func_{call_data['caller']}_{ns}/{rel_posix}"
             callee_id = f"Func_{call_data['callee']}_{ns}/{rel_posix}"
             _stub(caller_id, call_data["caller"], "function")
-            _stub(callee_id, call_data["callee"], "function")
-            batch_edges.append({"source_id": caller_id, "target_id": callee_id, "relation_type": "CALLS", "trust_score": 1.0, "verification_method": "source_parse"})
+            batch_edges.append({
+                "source_id": caller_id, "target_id": callee_id, "relation_type": "CALLS",
+                "properties": {"receivers": sorted(r for r in recv_sets[call_data["callee"]] if r)},
+                "trust_score": 1.0, "verification_method": "source_parse",
+            })
 
         pre_sweep_file_imports(db_path, file_id)
         for imp in set(entities["imports"]):
@@ -737,74 +1001,274 @@ def ingest_codebase(db_path: str, directory: str, agent_name: str = "Tree-sitter
     return {"status": "success", "parsed": parsed_files, "skipped": skipped_files, "calls_resolved": rewired}
 
 
+def _module_to_files(mod: str, level: int, caller_rel: str, ext: str, local_hint: str = None):
+    """Candidate repo-relative paths a bound module could live at (ordered).
+
+    Empty `mod` with level>0 (`from . import x`) uses `local_hint` (the bound
+    name) as the module file. Rust `crate::`/`super::` paths are mapped
+    best-effort; Go module paths are always external (no candidates).
+    """
+    def py_candidates(base: str, dotted: str):
+        seg = dotted.replace(".", "/")
+        stem = f"{base}/{seg}" if base else seg
+        if not dotted:
+            return []
+        return [f"{stem}.py", f"{stem}/__init__.py"]
+
+    if ext == ".py":
+        if level > 0:
+            parts = caller_rel.split("/")[:-1]
+            parts = parts[: len(parts) - (level - 1)] if level > 1 else parts
+            base = "/".join(parts)
+            if not mod and local_hint:
+                return py_candidates(base, local_hint) + py_candidates(base, mod)
+            return py_candidates(base, mod)
+        return py_candidates("", mod)
+    if ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
+        if not mod.startswith("."):
+            return []  # bare specifier: package, external
+        parts = caller_rel.split("/")[:-1]
+        segs = mod.split("/")
+        while segs and segs[0] == "..":
+            segs.pop(0)
+            if parts:
+                parts.pop()
+        if segs and segs[0] == ".":
+            segs.pop(0)
+        stem = "/".join(parts + segs)
+        out = [stem]
+        for sfx in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".d.ts"):
+            out.append(stem + sfx)
+            out.append(stem + "/index" + sfx)
+        return out
+    if ext == ".rs":
+        segs = mod.split("::") if mod else []
+        if segs and segs[0] in ("crate", "super", "self"):
+            head = segs[0]
+            rest = "/".join(segs[1:])
+            out = []
+            if rest:
+                if head == "crate":
+                    out += [f"src/{rest}.rs", f"src/{rest}/mod.rs"]
+                else:
+                    parts = caller_rel.split("/")[:-1]
+                    if head == "super" and parts:
+                        parts.pop()
+                    base = "/".join(parts)
+                    stem = f"{base}/{rest}" if base else rest
+                    out += [f"{stem}.rs", f"{stem}/mod.rs"]
+            return out
+        return []
+    return []
+
+
 def _resolve_cross_file_calls(db_path: str, ns: str) -> int:
     """
-    Post-pass (v3.7.0): CALLS edges initially point at same-file stubs. This pass
-    rewires every stub to the uniquely-named definition within the same project
-    namespace (identified structurally by its DEFINED_IN edge), so call graphs
-    cross file boundaries. Ambiguous names (multiple definitions) keep their stub.
-    Edge-less stubs are hard-deleted afterwards.
+    Post-pass: CALLS edges initially point at same-file stubs. This pass rewires
+    them to real targets, receiver-aware (v3.9.0):
+
+    1. Attributed call `recv.name()`: the caller file's import bindings resolve
+       the receiver root. A binding to an in-project module resolves `name`
+       inside that file (scope-aware — no more cross-linking two files'
+       same-named functions through a member call). A binding to an external
+       module rewires to a synthetic member node `Dependency_{ns}/<dotted>`,
+       so numpy.dot lands on numpy, not on an in-project `dot`.
+    2. Bare `name()`: an absolute external binding for the name wins over the
+       in-project unique-name rule (`from json import loads; loads()` is json's,
+       not the one project function called `loads`).
+    3. Fallback: uniquely-named in-project definition (v3.7.0 behavior).
+
+    Stubs that resolve to nothing keep their edges; edge-less stubs are
+    hard-deleted. Rewired edges carry `resolved_by` for audit.
     """
     ns_token = f"_{ns}/"
+    file_prefix = f"File_{ns}/"
+    now_fn = now_iso
     with get_connection(db_path) as conn:
-        # Defined functions: sources of DEFINED_IN edges (component -> file).
-        defined = {}
-        for (def_id,) in conn.execute(
-            "SELECT DISTINCT source_id FROM Edges WHERE relation_type = 'DEFINED_IN'"
+        # --- Registry: files (rel -> id, bindings), defs (global + per file) ---
+        files = {}      # rel_posix -> file_id
+        bindings_by_file = {}  # file_id -> {local: binding}
+        for fid, rel, bl in conn.execute(
+            "SELECT id, json_extract(properties, '$.path'), json_extract(properties, '$.bindings') "
+            "FROM Nodes WHERE json_extract(properties, '$.entity_type') = 'File' "
+            "AND is_deleted = 0 AND id LIKE ?",
+            (f"File_{ns}/%",),
         ).fetchall():
-            if not def_id.startswith("Func_") or ns_token not in def_id:
-                continue
-            row = conn.execute(
-                "SELECT properties FROM Nodes WHERE id = ? AND is_deleted = 0", (def_id,)
-            ).fetchone()
-            if not row:
-                continue
-            name = json.loads(row[0]).get("name") if row[0] else None
-            if name:
-                defined.setdefault(name, []).append(def_id)
+            if rel:
+                files[rel] = fid
+            if bl:
+                try:
+                    bindings_by_file[fid] = json.loads(bl)
+                except Exception:
+                    bindings_by_file[fid] = {}
 
-        # Stubs: CALLS targets that are not themselves definitions.
-        stub_ids = [
-            r[0] for r in conn.execute("""
-                SELECT DISTINCT e.target_id FROM Edges e
-                JOIN Nodes n ON n.id = e.target_id
-                WHERE e.relation_type = 'CALLS'
-                  AND n.is_deleted = 0
-                  AND e.target_id NOT IN (SELECT source_id FROM Edges WHERE relation_type = 'DEFINED_IN')
-            """).fetchall()
-            if r[0].startswith("Func_") and ns_token in r[0]
-        ]
+        # Definitions: DEFINED_IN edges give (def_id -> file_id); props give name.
+        defs_by_name = {}     # name -> [def_id]
+        defs_in_file = {}     # (file_id, name) -> def_id
+        def_files = dict(conn.execute(
+            "SELECT source_id, target_id FROM Edges WHERE relation_type = 'DEFINED_IN'"
+        ).fetchall())
+        defined_ids = set(def_files)
+        def_ids = [d for d in def_files if d.startswith("Func_") and ns_token in d]
+        for i in range(0, len(def_ids), 500):
+            chunk = def_ids[i:i + 500]
+            ph = ",".join("?" * len(chunk))
+            for did, props in conn.execute(
+                f"SELECT id, properties FROM Nodes WHERE id IN ({ph}) AND is_deleted = 0", chunk
+            ).fetchall():
+                name = json.loads(props).get("name") if props else None
+                if not name:
+                    continue
+                defs_by_name.setdefault(name, []).append(did)
+                defs_in_file.setdefault((def_files[did], name), did)
+
+        # Stub CALLS edges: target has no DEFINED_IN.
+        stub_edges = []
+        for src, tgt, props in conn.execute("""
+            SELECT e.source_id, e.target_id, e.properties FROM Edges e
+            JOIN Nodes n ON n.id = e.target_id
+            WHERE e.relation_type = 'CALLS'
+              AND n.is_deleted = 0
+              AND e.target_id NOT IN (SELECT source_id FROM Edges WHERE relation_type = 'DEFINED_IN')
+        """).fetchall():
+            if tgt.startswith("Func_") and ns_token in tgt and src.startswith("Func_") and ns_token in src:
+                stub_edges.append((src, tgt, props))
+
+        stub_names = {}
+        stub_ids = {t for _, t, _ in stub_edges}
+        if stub_ids:
+            stub_list = list(stub_ids)
+            for i in range(0, len(stub_list), 500):
+                chunk = stub_list[i:i + 500]
+                ph = ",".join("?" * len(chunk))
+                for sid, props in conn.execute(
+                    f"SELECT id, properties FROM Nodes WHERE id IN ({ph})", chunk
+                ).fetchall():
+                    stub_names[sid] = json.loads(props).get("name") if props else None
+
+        def _dotted_base(b):
+            """Full dotted module for a binding: `import a.b as c` -> a.b,
+            `from a.b import c` -> a.b.c, `from json import loads` -> json.loads."""
+            mod = b.get("module", "")
+            orig = b.get("orig")
+            if not orig or orig in ("*", "default") or orig == mod or (mod and orig.startswith(mod + ".")):
+                return mod
+            return f"{mod}.{orig}" if mod else orig
+
+        def _in_bound_file(b, name, caller_file_rel, ext):
+            """Def lookup for a binding that points at an in-project file.
+            For `from . import x` (empty module) the bound orig names the module file."""
+            hint = b.get("orig") or name
+            for cand in _module_to_files(b.get("module", ""), b.get("level", 0), caller_file_rel, ext, local_hint=hint):
+                if cand in files:
+                    hit = defs_in_file.get((files[cand], name))
+                    if hit:
+                        return hit
+            return None
+
+        def resolve(name, recv, caller_file_rel, bindings):
+            """-> (target_id, method, external_dotted) or None (keep stub)."""
+            ext = Path(caller_file_rel).suffix if caller_file_rel else ""
+            if recv:
+                root = recv.split(".")[0].strip("()[]") or recv
+                b = bindings.get(root)
+                if b is None:
+                    return _unique(name)  # local instance / unbound receiver: legacy rule
+                level = b.get("level", 0)
+                if level > 0 or (ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs")
+                                 and str(b.get("module", "")).startswith((".", "crate::", "super::", "self::"))):
+                    hit = _in_bound_file(b, name, caller_file_rel, ext)
+                    if hit:
+                        return hit, "receiver", None
+                    return _unique(name)
+                mod = b.get("module", "")
+                if mod:
+                    cands = _module_to_files(mod, 0, caller_file_rel, ext)
+                    if any(c in files for c in cands):
+                        hit = _in_bound_file(b, name, caller_file_rel, ext)
+                        if hit:
+                            return hit, "receiver", None
+                        return _unique(name)
+                    if cands or not mod.startswith("."):
+                        rest = recv[len(root):]  # chained segments beyond the root
+                        dotted = _dotted_base(b) + rest + "." + name
+                        return f"Dependency_{ns}/{dotted}", "receiver_external", dotted
+                    return None
+                return _unique(name)
+            # Bare call: an external module binding for the name wins over the
+            # in-project unique-name rule (`from json import loads; loads()`).
+            b = bindings.get(name)
+            if b and b.get("level", 0) > 0:
+                hit = _in_bound_file(b, name, caller_file_rel, ext)
+                if hit:
+                    return hit, "relative_binding", None
+            elif b and b.get("level", 0) == 0 and b.get("module"):
+                cands = _module_to_files(b["module"], 0, caller_file_rel, ext)
+                if any(c in files for c in cands):
+                    hit = _in_bound_file(b, name, caller_file_rel, ext)
+                    if hit:
+                        return hit, "module_binding", None
+                elif cands or not str(b["module"]).startswith("."):
+                    dotted = _dotted_base(b)
+                    if dotted:
+                        return f"Dependency_{ns}/{dotted}", "external_binding", dotted
+            return _unique(name)
+
+        def _unique(name):
+            cands = defs_by_name.get(name, [])
+            if len(cands) == 1:
+                return cands[0], "unique_name", None
+            return None
 
         rewired = 0
         with write_transaction(conn):
-            for stub_id in stub_ids:
-                row = conn.execute("SELECT properties FROM Nodes WHERE id = ?", (stub_id,)).fetchone()
-                name = json.loads(row[0]).get("name") if row and row[0] else None
+            for caller, stub_id, eprops in stub_edges:
+                name = stub_names.get(stub_id)
                 if not name:
                     continue
-                candidates = [c for c in defined.get(name, []) if c != stub_id]
-                if len(candidates) != 1:
-                    continue  # ambiguous or unknown — leave the stub
-                target = candidates[0]
-
-                for (caller,) in conn.execute(
-                    "SELECT source_id FROM Edges WHERE target_id = ? AND relation_type = 'CALLS'",
-                    (stub_id,),
-                ).fetchall():
+                try:
+                    old_props = json.loads(eprops) if eprops else {}
+                except Exception:
+                    old_props = {}
+                callers_rel = caller.split(ns_token, 1)[1]
+                bindings = bindings_by_file.get(file_prefix + callers_rel) or {}
+                receivers = [r for r in (old_props.get("receivers") or []) if r] or [None]
+                targets = {}
+                unresolved = 0
+                for recv in receivers:
+                    hit = resolve(name, recv, callers_rel, bindings)
+                    if hit:
+                        targets[hit[0]] = hit
+                    else:
+                        unresolved += 1
+                full = targets and not unresolved and len(targets) == 1
+                for target, (_t, method, dotted) in targets.items():
+                    if dotted:
+                        conn.execute(
+                            "INSERT INTO Nodes (id, label, properties, created_at, last_verified_at, updated_at, trust_score, verification_method) "
+                            "VALUES (?, 'Fact_Node', ?, ?, ?, ?, 0.8, 'source_parse') ON CONFLICT(id) DO NOTHING",
+                            (target, json.dumps({"entity_type": "External_Dependency", "module": dotted, "source": "AST_Call_Member"}), now_fn(), now_fn(), now_fn()),
+                        )
+                    new_props = dict(old_props)
+                    new_props["resolved_by"] = method
                     conn.execute("""
                         INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
-                        VALUES (?, ?, 'CALLS', '{}', ?, ?, 1.0, 'source_parse')
+                        VALUES (?, ?, 'CALLS', ?, ?, ?, 1.0, 'source_parse')
                         ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
-                            last_verified_at = excluded.last_verified_at
-                    """, (caller, target, now_iso(), now_iso()))
-                conn.execute(
-                    "DELETE FROM Edges WHERE target_id = ? AND relation_type = 'CALLS'", (stub_id,)
-                )
+                            last_verified_at = excluded.last_verified_at,
+                            properties = CASE WHEN excluded.properties = '{}' THEN Edges.properties ELSE excluded.properties END
+                    """, (caller, target, json.dumps(new_props), now_fn(), now_fn()))
+                if not full:
+                    # Unresolved or split across receivers: keep the stub edge —
+                    # it documents the ambiguity a wrong edge would hide.
+                    continue
+                target = next(iter(targets))
+                conn.execute("DELETE FROM Edges WHERE source_id = ? AND target_id = ? AND relation_type = 'CALLS'", (caller, stub_id))
                 leftover = conn.execute(
-                    "SELECT 1 FROM Edges WHERE source_id = ? OR target_id = ? LIMIT 1",
+                    "SELECT 1 FROM Edges WHERE (source_id = ? OR target_id = ?) AND relation_type = 'CALLS' LIMIT 1",
                     (stub_id, stub_id),
                 ).fetchone()
-                if not leftover:
+                if not leftover and stub_id not in defined_ids:
                     conn.execute("DELETE FROM Nodes WHERE id = ?", (stub_id,))
                 rewired += 1
     return rewired

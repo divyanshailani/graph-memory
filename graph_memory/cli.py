@@ -145,6 +145,20 @@ def main():
 
     hook_event_parser = subparsers.add_parser("hook-event", help="Internal: dispatch a harness lifecycle hook payload from stdin (PostToolUse/Stop/SessionStart)")
 
+    # Verify (v3.9.0)
+    verify_parser = subparsers.add_parser("verify", help="Mechanically re-verify memory: hash-stable AST facts, optionally curated nodes via the test suite")
+    verify_parser.add_argument("--tests", action="store_true", help="Also re-verify curated knowledge/release/episode nodes when the project's test suite passes")
+    verify_parser.add_argument("--test-cmd", type=str, default=None, help="Test command for --tests (default: env GRAPH_MEMORY_TEST_CMD, else 'python -m pytest -q')")
+    verify_parser.add_argument("--workspace", type=str, default=None, help="Directory to run tests in (default: project root inferred from the --db location)")
+    verify_parser.add_argument("--timeout", type=int, default=600, help="Test command timeout in seconds (default: 600)")
+    verify_parser.add_argument("--no-refresh", action="store_true", help="Skip refreshing installed framework snapshot files after verification")
+
+    # Schedule (v3.9.0)
+    schedule_parser = subparsers.add_parser("schedule", help="Manage the OS-level job that runs 'verify' on an interval (launchd / systemd-user / Task Scheduler)")
+    schedule_parser.add_argument("action", choices=["install", "uninstall", "status"], help="What to do with the scheduled job")
+    schedule_parser.add_argument("--interval", type=int, default=86400, help="Run interval in seconds (default: 86400 = daily)")
+    schedule_parser.add_argument("--no-tests", action="store_true", help="Scheduled job runs only the hash-stable pass, never the project's test suite")
+
     args = parser.parse_args()
     
     db_path = args.db or engine.get_db_path()
@@ -609,6 +623,43 @@ def main():
             with open(args.output_file, "w") as f:
                 f.write(html_content)
             print(f"Exported HTML visualization to {args.output_file}")
+
+        elif args.command == "verify":
+            stats = engine.reverify_hash_stable_nodes(db_path)
+            parts = [
+                f"hash-stable: {stats['nodes_reverified']} node(s) re-verified",
+                f"({stats['files_stable']}/{stats['files_checked']} files byte-identical"
+                f", {stats['files_changed']} changed, {stats['files_missing']} missing)",
+            ]
+            if args.tests:
+                t = engine.reverify_test_backed_nodes(
+                    db_path, workspace_dir=args.workspace,
+                    test_cmd=args.test_cmd, timeout=args.timeout,
+                )
+                if t["passed"]:
+                    parts.append(f"tests: green, {t['nodes_reverified']} curated node(s) re-verified")
+                else:
+                    detail = t.get("error") or f"exit code {t['exit_code']}"
+                    parts.append(f"tests: not green ({detail}), curated nodes untouched")
+            if not args.no_refresh:
+                try:
+                    from graph_memory.integrations.framework_hooks import refresh_installed_snapshots
+                    refresh_installed_snapshots(db_path)
+                except Exception:
+                    pass  # refresh is best-effort; verification result stands
+            print("\n".join(parts))
+
+        elif args.command == "schedule":
+            from graph_memory.integrations import scheduler
+            if args.action == "install":
+                result = scheduler.install(db_path, interval=args.interval, tests=not args.no_tests)
+            elif args.action == "uninstall":
+                result = scheduler.uninstall(db_path)
+            else:
+                result = scheduler.status(db_path)
+            print(json.dumps(result, indent=2))
+            if args.action == "install" and not result.get("installed"):
+                sys.exit(1)
 
     except Exception as e:
         print(f"Error: {e}")

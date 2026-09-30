@@ -13,8 +13,9 @@ Event mapping:
 - Stop / SessionEnd -> best-effort episodic capture: the transcript tail is
   logged into Session_Logs (FTS5) and assistant turns are distilled into graph
   facts, then installed snapshot files are refreshed.
-- SessionStart -> refreshes the auto-memory snapshot files of every installed
-  framework so sessions begin with current memory.
+- SessionStart -> mechanically re-verifies hash-stable facts (v3.9.0), then
+  refreshes the auto-memory snapshot files of every installed framework so
+  sessions begin with current, unwithered memory.
 
 Output contract: hooks must stay silent (strict JSON-output schemas like ZCode's
 reject stray stdout), so nothing is printed on success; errors go to stderr and
@@ -23,7 +24,7 @@ the process still exits 0 unless the dispatcher itself is misused.
 import json
 import sys
 
-from graph_memory.core.engine import get_db_path as _engine_db_path, log_session_message, get_or_create_node
+from graph_memory.core.engine import get_db_path as _engine_db_path, log_session_message, get_or_create_node, reverify_hash_stable_nodes
 from graph_memory.core.distill import extract_facts_from_text
 
 EDIT_TOOLS = {"Write", "Edit", "MultiEdit", "ApplyPatch", "write_file", "edit_file", "str_replace_editor"}
@@ -101,10 +102,21 @@ def _handle_stop(payload: dict, db_path: str) -> dict:
 
 
 def _handle_session_start(payload: dict, db_path: str) -> dict:
+    # Mechanical re-verification before rendering: files that did not change
+    # since ingest are still true, so sessions start with an unwithered graph
+    # without any agent effort (v3.9.0). Never test-driven here — a test suite
+    # is too slow for a session-start hook; that pass belongs to `verify --tests`
+    # and the scheduled job.
+    reverified = 0
+    try:
+        stats = reverify_hash_stable_nodes(db_path)
+        reverified = stats.get("nodes_reverified", 0)
+    except Exception as e:
+        print(f"[graph-memory] re-verify failed: {e}", file=sys.stderr)
     try:
         from graph_memory.integrations.framework_hooks import refresh_installed_snapshots
         refresh_installed_snapshots(db_path)
-        return {"status": "ok", "refreshed": True}
+        return {"status": "ok", "refreshed": True, "reverified": reverified}
     except Exception as e:
         print(f"[graph-memory] snapshot refresh failed: {e}", file=sys.stderr)
         return {"status": "error", "reason": str(e)}

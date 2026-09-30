@@ -23,5 +23,7 @@ build/
 # Test cache
 .pytest_cache/
 
-# Agent-local state
-.agents/
+# Agent-local state (contents ignored, but project_id is committable:
+# a directory itself can't be excluded and then negated file-by-file)
+.agents/*
+!/.agents/project_id

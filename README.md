@@ -16,7 +16,7 @@
 <p align="center">
   <a href="https://pypi.org/project/epistemic-graph-memory/"><img src="https://img.shields.io/pypi/v/epistemic-graph-memory?color=blue" alt="PyPI"></a>
   <a href="https://github.com/divyanshailani/graph-memory/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
-  <img src="https://img.shields.io/badge/tests-66%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-76%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Python-3.10+-blue" alt="Python">
 </p>
 
@@ -30,7 +30,7 @@ AI coding agents reconstruct project context from scratch every session. They re
 
 A **SQLite-backed knowledge graph** that lives in your project at `.agents/graph_memory.sqlite`. It ingests your codebase's AST (functions, classes, call graphs, imports), records agent decisions in an append-only ledger, detects when agents contradict each other, and produces deterministic snapshots that inject directly into agent system prompts — with byte-stable caching so prompt caches stay hot.
 
-All 19 MCP tools, a 28-command CLI, lifecycle hooks for 9 agent harnesses, and a streamable HTTP endpoint for remote agents.
+All 20 MCP tools, a 30-command CLI, lifecycle hooks for 9 agent harnesses, and a streamable HTTP endpoint for remote agents.
 
 ---
 
@@ -146,6 +146,13 @@ graph-memory contradictions
 # Stale-node garbage collection
 graph-memory prune --days 60
 
+# Mechanical re-verification (hash-stable AST facts; curated nodes via test suite)
+graph-memory verify
+graph-memory verify --tests
+
+# Scheduled verification (launchd / systemd / Task Scheduler, no daemon)
+graph-memory schedule install --interval 1d
+
 # Import existing memories
 graph-memory import-md CLAUDE.md
 graph-memory import-mem0 memories.json
@@ -170,6 +177,7 @@ graph-memory export-3d graph_3d.html
 | `query_decision_history` | Append-only decision ledger (who changed what, why, when) |
 | `search_nodes` | FTS5 + substring search across nodes |
 | `read_code_snippet` | AST-derived signature, docstring, line bounds, source snippet |
+| `verify_memory` | Mechanical re-verification: hash-stable AST facts, curated nodes via a passing test suite |
 | `ingest_file` | Incremental single-file AST re-parse (<5ms, hash-skip) |
 | `create_entities` | Create graph nodes with trust scores |
 | `create_relations` | Create directed edges between nodes |
@@ -194,11 +202,12 @@ graph_memory/
 │   ├── distill.py       # Session transcript micro-compaction
 │   └── knowledge.py     # LLM-powered MOC summarization
 ├── mcp/
-│   ├── server.py        # Stdio MCP server (19 tools)
+│   ├── server.py        # Stdio MCP server (20 tools)
 │   └── http_server.py   # Streamable HTTP MCP transport
 ├── integrations/
-│   └── framework_hooks.py  # 9-framework auto-install + lifecycle wiring
-└── cli.py               # 28-command CLI
+│   ├── framework_hooks.py  # 9-framework auto-install + lifecycle wiring
+│   └── scheduler.py     # OS-native scheduled verification (launchd/systemd/schtasks)
+└── cli.py               # 30-command CLI
 ```
 
 **Storage**: Single SQLite file per project at `.agents/graph_memory.sqlite`. WAL mode for concurrent safety. FTS5 for full-text search. No external databases, no servers, no cloud.
@@ -213,10 +222,10 @@ graph_memory/
 
 | Metric | Value |
 |---|---|
-| Source code | 5,582 lines Python |
-| Test code | 1,879 lines, 66 tests |
-| MCP tools | 19 |
-| CLI commands | 28 |
+| Source code | 6,541 lines Python |
+| Test code | 2,104 lines, 76 tests |
+| MCP tools | 20 |
+| CLI commands | 30 |
 | Agent harnesses | 9 |
 | AST languages | 7 variants (Python, TS, TSX, JS, JSX, Go, Rust) |
 | Dependencies | 0 required (core is stdlib-only; MCP + AST are extras) |

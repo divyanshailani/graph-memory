@@ -20,7 +20,7 @@ server = Server("graph-memory")
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
     """
-    Exposes 19 MCP tools for graph memory operations:
+    Exposes 20 MCP tools for graph memory operations:
     - Standard memory tools: create_entities, create_relations, add_observations, read_graph, search_nodes, open_nodes, delete_entities, merge_entities
     - AST tools: ingest_file, read_code_snippet
     - Decision tools: query_decision_history
@@ -353,6 +353,19 @@ async def handle_list_tools() -> list[types.Tool]:
                 }
             }
         ),
+        types.Tool(
+            name="verify_memory",
+            description="Mechanically re-verify memory: hash-stable AST facts always; curated knowledge/release/episode nodes only when --tests runs the project's test suite and it passes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "db_path": {"type": "string", "description": "Optional path to graph_memory.sqlite database."},
+                    "tests": {"type": "boolean", "description": "Also re-verify curated nodes via the project's test suite (default: false)."},
+                    "test_cmd": {"type": "string", "description": "Test command override (default: env GRAPH_MEMORY_TEST_CMD, else 'python -m pytest -q')."},
+                    "workspace": {"type": "string", "description": "Directory to run tests in (default: project root inferred from db location)."}
+                }
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -510,6 +523,16 @@ async def handle_call_tool(
             target_dir = arguments.get("target_dir", ".agents")
             from graph_memory.core.memory import reflect_session_memory
             res = reflect_session_memory(actual_db_path, target_dir)
+            return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
+
+        elif name == "verify_memory":
+            res = engine.reverify_hash_stable_nodes(actual_db_path)
+            if arguments.get("tests"):
+                res["test_pass"] = engine.reverify_test_backed_nodes(
+                    actual_db_path,
+                    workspace_dir=arguments.get("workspace"),
+                    test_cmd=arguments.get("test_cmd"),
+                )
             return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
 
         else:

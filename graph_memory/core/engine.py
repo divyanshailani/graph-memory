@@ -4,6 +4,7 @@ import os
 import hashlib
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Database Configuration
@@ -66,12 +67,51 @@ def write_transaction(conn: sqlite3.Connection):
 # Schema Initialization
 # ---------------------------------------------------------------------------
 
+def _migrate_v1(conn: sqlite3.Connection):
+    """v1 -> v2: the trust/verification columns, previously re-attempted on every
+    init via try/except ALTER. Now they run exactly once, on upgrade, and a
+    database created after v3.9.0 carries them in the base DDL instead."""
+    for table, column, decl in (
+        ("Nodes", "trust_score", "FLOAT DEFAULT 1.0"),
+        ("Edges", "trust_score", "FLOAT DEFAULT 1.0"),
+        ("Nodes", "verification_method", "TEXT DEFAULT 'unknown'"),
+        ("Edges", "verification_method", "TEXT DEFAULT 'unknown'"),
+    ):
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def _migrate_v2(conn: sqlite3.Connection):
+    """v2 -> v3: target-side edge index. Edges' UNIQUE(source, target, type) only
+    serves source-side scans; sweeps, stub detection and cross-file resolution all
+    filter on target_id, which was a full scan. Same statement also lands in the
+    base DDL below for fresh databases."""
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON Edges(target_id, relation_type)")
+
+
+_MIGRATIONS = {1: _migrate_v1, 2: _migrate_v2}
+
+SCHEMA_VERSION = 3
+
 def init_db(db_path: str):
     """
     Initialize the Trust-Weighted Epistemic Graph schema.
+
+    Schema evolution is versioned (v3.9.0): `schema_version` holds one row, and
+    `_MIGRATIONS[v]` upgrades a database from version v to v+1. Fresh databases
+    are created at the latest version and no migration runs; databases from
+    before versioning exist are treated as version 1 (the historical
+    try/except-ALTER state) and upgraded in order. An upgrade failure rolls back
+    the whole init transaction, so a half-migrated file never records a version.
     """
     with get_connection(db_path) as conn:
         with write_transaction(conn):
+            # Snapshot pre-existing tables before any DDL: this decides whether
+            # the store is fresh or predates schema versioning.
+            legacy_db = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Nodes'"
+            ).fetchone() is not None
             # Nodes Table (Entities)
             # Includes tracking for memory decay and soft deletes.
             conn.execute("""
@@ -149,23 +189,23 @@ def init_db(db_path: str):
                 )
             """)
 
-            # Migration for existing databases
-            try:
-                conn.execute("ALTER TABLE Nodes ADD COLUMN trust_score FLOAT DEFAULT 1.0")
-            except sqlite3.OperationalError:
-                pass # Column already exists
-            try:
-                conn.execute("ALTER TABLE Edges ADD COLUMN trust_score FLOAT DEFAULT 1.0")
-            except sqlite3.OperationalError:
-                pass # Column already exists
-            try:
-                conn.execute("ALTER TABLE Nodes ADD COLUMN verification_method TEXT DEFAULT 'unknown'")
-            except sqlite3.OperationalError:
-                pass # Column already exists
-            try:
-                conn.execute("ALTER TABLE Edges ADD COLUMN verification_method TEXT DEFAULT 'unknown'")
-            except sqlite3.OperationalError:
-                pass # Column already exists
+            # --- Schema versioning (v3.9.0) -----------------------------
+            # A database predating this table is version 1: its historical
+            # schema was tracked only through the try/except ALTERs that used
+            # to run on every init. Those ALTERs now live in _MIGRATIONS[1] and
+            # run exactly once, on upgrade.
+            conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
+            row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+            if row is None:
+                current_version = 1 if legacy_db else SCHEMA_VERSION
+                conn.execute("INSERT INTO schema_version (version) VALUES (?)", (current_version,))
+            else:
+                current_version = row[0]
+            if current_version > SCHEMA_VERSION:
+                raise sqlite3.OperationalError(
+                    f"Database schema v{current_version} is newer than this build supports "
+                    f"(v{SCHEMA_VERSION}). Upgrade graph-memory before opening it."
+                )
             
             # FTS5 Shadow Table for Full-Text Search
             conn.execute("""
@@ -201,6 +241,20 @@ def init_db(db_path: str):
                 CREATE INDEX IF NOT EXISTS idx_nodes_type
                 ON Nodes(json_extract(properties, '$.type'))
             """)
+
+            # Target-side edge index (v3.9.0): stub detection, sweep_orphans and
+            # cross-file resolution filter on target_id, which the composite
+            # UNIQUE(source, target, type) cannot serve. Fresh databases get it
+            # here; v2-and-older stores get it via _migrate_v2.
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON Edges(target_id, relation_type)")
+
+            # Pending migrations run last, once all current DDL exists, and the
+            # version is only recorded after every step succeeded — the
+            # surrounding write_transaction rolls the lot back on failure.
+            while current_version < SCHEMA_VERSION:
+                _MIGRATIONS[current_version](conn)
+                current_version += 1
+                conn.execute("UPDATE schema_version SET version = ?", (current_version,))
 
         # NOTE (v3.7.0): identifier/substring search uses a LIKE-based fallback in
         # search_nodes instead of a second FTS5 index. An external-content trigram
@@ -548,7 +602,7 @@ def bulk_upsert_nodes(db_path: str, nodes: list, edges: list = None, agent_name:
     thousands of symbols.
 
     nodes: [{id, label, properties, trust_score, verification_method, link_to, link_type}, ...]
-    edges: [{source_id, target_id, relation_type, trust_score, verification_method}, ...]
+    edges: [{source_id, target_id, relation_type, trust_score, verification_method, properties?}, ...]
     """
     init_db(db_path)
     ts = now_iso()
@@ -646,12 +700,15 @@ def bulk_upsert_nodes(db_path: str, nodes: list, edges: list = None, agent_name:
                         existing[endpoint] = "{}"
                 conn.execute("""
                     INSERT INTO Edges (source_id, target_id, relation_type, properties, created_at, last_verified_at, trust_score, verification_method)
-                    VALUES (?, ?, ?, '{}', ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
                         last_verified_at = excluded.last_verified_at,
                         verification_method = excluded.verification_method,
-                        trust_score = MAX(trust_score, excluded.trust_score)
-                """, (e["source_id"], e["target_id"], e["relation_type"], ts, ts,
+                        trust_score = MAX(trust_score, excluded.trust_score),
+                        properties = CASE WHEN excluded.properties = '{}' THEN Edges.properties
+                                          ELSE excluded.properties END
+                """, (e["source_id"], e["target_id"], e["relation_type"],
+                      json.dumps(e.get("properties") or {}), ts, ts,
                       e.get("trust_score", 1.0), e.get("verification_method", "unknown")))
 
     return {"nodes": len(nodes), "edges": len(edges)}
@@ -846,6 +903,73 @@ def reverify_hash_stable_nodes(db_path: str) -> dict:
                     (timestamp, *chunk),
                 )
 
+    return stats
+
+def reverify_test_backed_nodes(
+    db_path: str,
+    workspace_dir: Optional[str] = None,
+    test_cmd: Optional[str] = None,
+    timeout: int = 600,
+) -> dict:
+    """
+    Mechanically re-verifies curated nodes by running the project's test suite.
+
+    Curated facts — knowledge cards, release milestones, episodic notes — are
+    assertions with no file to hash, so reverify_hash_stable_nodes can never
+    touch them and they decay below the retrieval floor on a quiet repo. A green
+    test suite is the only machine-checkable evidence that the system still
+    behaves the way those cards describe, so the pass bumps their verification
+    clock. This is an approximation: a green suite does not prove a card whose
+    behavior no test exercises, so the bump is bounded (trust is restored but
+    the method recorded is 'test_pass', not 'manual').
+
+    Command resolution: explicit `test_cmd` > env GRAPH_MEMORY_TEST_CMD >
+    `python -m pytest -q`, run in `workspace_dir` (default: the project root
+    inferred from the db location). A missing test runner or a red/timeout run
+    re-verifies nothing; only exit code 0 counts.
+
+    Bumps only trust_score / last_verified_at / verification_method on curated
+    labels, never the payload, so snapshots stay prompt-stable. No
+    Decision_Ledger rows — mechanical signal isolation, same as hash_stable.
+    """
+    import subprocess
+
+    init_db(db_path)
+    stats = {"passed": False, "exit_code": None, "nodes_reverified": 0}
+
+    if workspace_dir is None:
+        parent = os.path.dirname(os.path.abspath(db_path))
+        workspace_dir = os.path.dirname(parent) if os.path.basename(parent) == ".agents" else parent
+    cmd = test_cmd or os.environ.get("GRAPH_MEMORY_TEST_CMD") or "python -m pytest -q"
+
+    try:
+        run = subprocess.run(
+            cmd, shell=True, cwd=workspace_dir,
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        stats["error"] = str(exc)
+        return stats
+
+    stats["exit_code"] = run.returncode
+    if run.returncode != 0:
+        return stats
+    stats["passed"] = True
+
+    with get_connection(db_path) as conn:
+        with write_transaction(conn):
+            cur = conn.execute("""
+                UPDATE Nodes
+                SET trust_score = MAX(trust_score, 1.0),
+                    last_verified_at = ?,
+                    verification_method = 'test_pass'
+                WHERE is_deleted = 0
+                  AND label IN ('Fact_Node', 'Knowledge_Node', 'Release_Node', 'Episode_Node')
+                  AND (json_extract(properties, '$.entity_type') IS NULL
+                       OR json_extract(properties, '$.entity_type')
+                          NOT IN ('File', 'Component', 'External_Dependency', 'MOC_Hub', 'Project'))
+            """, (now_iso(),))
+            stats["nodes_reverified"] = cur.rowcount
     return stats
 
 def create_relation(
