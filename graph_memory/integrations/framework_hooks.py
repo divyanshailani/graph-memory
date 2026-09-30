@@ -87,8 +87,25 @@ OPENCODE_SECTION_END = "<!-- graph-memory:auto:end -->"
 
 CODEX_MCP_MARKER = "# >>> graph-memory mcp >>>"
 
-# Hook entrypoint: venv-proof module invocation of the lifecycle dispatcher.
+# Hook entrypoint: module-form fallback invocation of the lifecycle dispatcher,
+# used only when no console script is on PATH (see hook_event_command).
 HOOK_EVENT_ARGS = ["-m", "graph_memory.cli", "hook-event"]
+
+def hook_event_command():
+    """(command, args) for the lifecycle dispatcher hook entry, venv-portable.
+
+    Prefers the installed `graph-memory` console script found on PATH: for
+    uv-tool/pipx/global installs that path is stable, so moving or rebuilding
+    any project venv cannot silently break a harness that baked it in. Falls
+    back to module form on the current interpreter only when no script exists
+    on PATH (pip install into a venv that is not on the harness's PATH —
+    better than writing a command the harness can never run).
+    """
+    script = shutil.which("graph-memory")
+    if script:
+        return script, ["hook-event"]
+    return sys.executable, list(HOOK_EVENT_ARGS)
+
 MCP_SERVER_COMMAND = "graph-memory-mcp"
 
 # Identification markers for our hook entries inside host configs (any of these
@@ -197,14 +214,21 @@ def _render_opencode(snapshot):
 # ---------------------------------------------------------------------------
 def _is_our_hook(entry):
     cmd = entry.get("command", "")
-    if any(marker in cmd for marker in HOOK_MARKERS):
-        return True
     args = " ".join(entry.get("args", []) or [])
-    return any(marker in args for marker in HOOK_MARKERS)
+    # Quotes removed so the shell-quoted console form `"…/graph-memory"
+    # hook-event` matches the same markers as the raw strings.
+    plain = cmd.replace('"', "")
+    if any(marker in plain or marker in args for marker in HOOK_MARKERS):
+        return True
+    # Console-script form (v3.9.1): `.../graph-memory` + hook-event.
+    first = plain.split()[:1]
+    script = os.path.splitext(os.path.basename(first[0] if first else ""))[0]
+    return script == "graph-memory" and "hook-event" in (args or plain)
 
 def install_claude_code_event_hooks():
     """Merges graph-memory lifecycle hooks into ~/.claude/settings.json (idempotent)."""
-    hook_spec = {"type": "command", "command": f'"{sys.executable}" ' + " ".join(HOOK_EVENT_ARGS)}
+    command, args = hook_event_command()
+    hook_spec = {"type": "command", "command": f'"{command}" ' + " ".join(args)}
     events = {
         "PostToolUse": [{"matcher": "Write|Edit|MultiEdit", "hooks": [hook_spec]}],
         "Stop": [{"hooks": [dict(hook_spec)]}],
@@ -251,11 +275,13 @@ def install_zcode_event_hooks():
     ZCode hook schema: hooks.events.<Event> -> [{matcher?, hooks:[{type: process, command, args, timeoutMs}]}]
     Configuration-file hooks require hooks.enabled = true.
     """
+    command, args = hook_event_command()
+
     def make_entry():
         return {
             "type": "process",
-            "command": sys.executable,
-            "args": list(HOOK_EVENT_ARGS),
+            "command": command,
+            "args": args,
             "timeoutMs": 30000,
         }
 

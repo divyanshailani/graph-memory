@@ -10,7 +10,7 @@ All HOME-resolved framework paths are monkeypatched to tmp_path so tests never
 touch real harness configuration files.
 """
 import json
-from pathlib import Path
+import sys
 
 import graph_memory.integrations.framework_hooks as fh
 from graph_memory.core import engine, lifecycle
@@ -172,3 +172,50 @@ def test_session_start_refreshes_installed_snapshot(tmp_path, monkeypatch):
     refreshed = auto_file.read_text()
     assert refreshed != original
     assert "WAL mode" in refreshed
+
+
+def test_hook_command_prefers_console_script_and_migrates_legacy(tmp_path, monkeypatch):
+    """v3.9.1: hooks must not bake a project venv's interpreter path."""
+    db_path = str(tmp_path / "test.sqlite")
+    engine.init_db(db_path)
+    fake_script = str(tmp_path / "somewhere-else" / "bin" / "graph-memory")
+    monkeypatch.setattr(fh.shutil, "which",
+                        lambda name: fake_script if name == "graph-memory" else None)
+
+    cfg = tmp_path / "zcode" / "config.json"
+    cfg.parent.mkdir(parents=True)
+    legacy_entry = {
+        "type": "process", "command": "/gone/venv/bin/python3",
+        "args": ["-m", "graph_memory.cli", "hook-event"], "timeoutMs": 30000,
+    }
+    cfg.write_text(json.dumps({"hooks": {"enabled": True, "events": {
+        "Stop": [{"hooks": [legacy_entry]}]}}}), encoding="utf-8")
+    monkeypatch.setattr(fh, "ZCODE_CONFIG_PATH", str(cfg))
+
+    fh.install_zcode_event_hooks()
+    entries = [h for groups in json.loads(cfg.read_text())["hooks"]["events"].values()
+               for g in groups for h in g["hooks"]]
+    assert all(e["command"] != "/gone/venv/bin/python3" for e in entries)  # legacy replaced
+    assert all(e["command"] == fake_script and e["args"] == ["hook-event"] for e in entries)
+
+    # Reinstall is idempotent under the new form too.
+    fh.install_zcode_event_hooks()
+    entries = [h for groups in json.loads(cfg.read_text())["hooks"]["events"].values()
+               for g in groups for h in g["hooks"]]
+    assert len(entries) == 3
+
+    ok, _ = fh.uninstall_zcode_event_hooks()
+    assert ok
+    assert not json.loads(cfg.read_text())["hooks"].get("events")
+
+    # Claude Code settings.json: quoted script form.
+    settings_path = tmp_path / "claude" / "settings.json"
+    monkeypatch.setattr(fh, "CLAUDE_SETTINGS_PATH", str(settings_path))
+    fh.install_claude_code_event_hooks()
+    cmd = json.loads(settings_path.read_text())["hooks"]["Stop"][0]["hooks"][0]["command"]
+    assert cmd == f'"{fake_script}" hook-event'
+
+    # No console script on PATH: fall back to module form on current interpreter.
+    monkeypatch.setattr(fh.shutil, "which", lambda name: None)
+    command, args = fh.hook_event_command()
+    assert command == sys.executable and args == fh.HOOK_EVENT_ARGS

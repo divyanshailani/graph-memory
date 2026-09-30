@@ -32,7 +32,15 @@ def _job_key(db_path: str) -> str:
 
 
 def verify_argv(db_path: str, tests: bool = True) -> list:
-    argv = [sys.executable, "-m", "graph_memory.cli", "--db", db_path, "verify"]
+    """Absolute-path argv: launchd/systemd run jobs with a minimal PATH, so
+    the bare console script is never found — resolve it at install time.
+    The script path is stabler than a project venv's interpreter: rebuilding
+    or relocating the venv that installed the job keeps the job alive as long
+    as the script itself still resolves. Falls back to module form only when
+    no script is on PATH."""
+    import shutil
+    script = shutil.which("graph-memory")
+    argv = ([script] if script else [sys.executable, "-m", "graph_memory.cli"]) + ["--db", db_path, "verify"]
     if tests:
         argv.append("--tests")
     return argv

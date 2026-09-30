@@ -207,7 +207,8 @@ graph_memory/
 │   ├── memory.py        # Data-driven reflection engine
 │   ├── lifecycle.py      # Harness-agnostic event dispatcher
 │   ├── distill.py       # Session transcript micro-compaction
-│   └── knowledge.py     # LLM-powered MOC summarization
+│   ├── knowledge.py     # Knowledge-card extraction + repo-wiki export
+│   └── summarizer.py    # Optional: Gemini MOC summarization (opt-in, GEMINI_API_KEY)
 ├── mcp/
 │   ├── server.py        # Stdio MCP server (20 tools)
 │   └── http_server.py   # Streamable HTTP MCP transport
@@ -217,7 +218,7 @@ graph_memory/
 └── cli.py               # 30-command CLI
 ```
 
-**Storage**: Single SQLite file per project at `.agents/graph_memory.sqlite`. WAL mode for concurrent safety. FTS5 for full-text search. No external databases, no servers, no cloud.
+**Storage**: Single SQLite file per project at `.agents/graph_memory.sqlite`. WAL mode for concurrent safety. FTS5 for full-text search. No external databases, no servers, no cloud — the only network call anywhere is the opt-in `summarize-mocs` command, which uses Gemini via `GEMINI_API_KEY`.
 
 **Node types**: `Fact_Node` (deterministic ground truth from AST/Git), `Knowledge_Node` (architecture, design decisions), `Episode_Node` (completed task sequences), `Release_Node` (published versions).
 
@@ -236,7 +237,7 @@ graph_memory/
 | Agent harnesses | 9 |
 | AST languages | 7 variants (Python, TS, TSX, JS, JSX, Go, Rust) |
 | Dependencies | 0 required (core is stdlib-only; MCP + AST are extras) |
-| External services | 0 |
+| External services | 0 required (opt-in `summarize-mocs` calls Gemini via `GEMINI_API_KEY`) |
 
 ---
 
